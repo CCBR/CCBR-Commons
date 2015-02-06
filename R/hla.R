@@ -1,0 +1,331 @@
+# hla.R
+# Preliminary analysis of HLA data for Denise Whitby
+# Randall Johnson
+# CCR Collaborative Bioinformatics Resource
+# Advanced Biomedical Computing Center at Frederick National Laboratory
+# Leidos Biomedical Research, Inc
+# Created January 30, 2015
+# Last Modified February 5, 2015
+
+library(gdata)
+library(lpSolve)
+library(WriteXLS)
+
+#############
+# Data Prep #
+#############
+
+##### HLA data from Carrington lab #####
+dat <- read.xls('data/Cameroon_KS_HLA.xlsx', stringsAsFactors = FALSE, na.strings = c(''))
+dat$PID <- gsub('_VOS', '', dat$PID)
+
+clin <- read.csv('data/ksbase.csv', stringsAsFactors = FALSE,
+                 na.strings = c('Legitimate Skip', '-1', '88', '99'))
+clin$case <- with(clin, G1 == 2 & !is.na(F1) & A3 == 1)
+
+dat <- merge(dat, subset(clin, select = c('ID', 'case')), by.x = 'PID', by.y = 'ID')
+
+names(dat) <- gsub('Export.', '', names(dat), fixed = TRUE)
+rownames(dat) <- dat$PID
+
+
+##### Load HLA data from my R package #####
+load('~/Documents/Work/HLA/HLA/data/hlaA_broad.RData')
+load('~/Documents/Work/HLA/HLA/data/hlaB_broad.RData')
+load('~/Documents/Work/HLA/HLA/data/hlaBw.RData')
+load('~/Documents/Work/HLA/HLA/data/hlaC_broad.RData')
+load('~/Documents/Work/HLA/HLA/data/hlaCgrp.RData')
+load('~/Documents/Work/HLA/HLA/data/hlaDQA_broad.RData')
+load('~/Documents/Work/HLA/HLA/data/hlaDRB1_broad.RData')
+
+
+##### Figure out genotypes at different levels of accuracy #####
+
+# allele group level (2 digit typing)
+agroup <- function(var)
+    sapply(strsplit(var, ":"), `[`, 1)
+
+dat$C1A1.agroup <- agroup(dat$C1A1)
+dat$C1A2.agroup <- agroup(dat$C1A2)
+
+dat$C1B1.agroup <- agroup(dat$C1B1)
+dat$C1B2.agroup <- agroup(dat$C1B2)
+
+dat$C1C1.agroup <- agroup(dat$C1C1)
+dat$C1C2.agroup <- agroup(dat$C1C2)
+
+dat$DQA.A1.agroup <- agroup(dat$DQA.A1)
+dat$DQA.A2.agroup <- agroup(dat$DQA.A2)
+
+dat$DRB1.A1.agroup <- agroup(dat$DRB1.A1)
+dat$DRB1.A2.agroup <- agroup(dat$DRB1.A2)
+
+# broad level (old typing)
+dat$C1A1.broad <- hlaA.broad[dat$C1A1.agroup]
+dat$C1A2.broad <- hlaA.broad[dat$C1A2.agroup]
+
+dat$C1B1.broad <- hlaB.broad[dat$C1B1.agroup]
+dat$C1B2.broad <- hlaB.broad[dat$C1B2.agroup]
+
+dat$C1C1.broad <- hlaC.broad[dat$C1C1.agroup]
+dat$C1C2.broad <- hlaC.broad[dat$C1C2.agroup]
+
+dat$DQA.A1.broad <- hlaDQA.broad[dat$DQA.A1.agroup]
+dat$DQA.A2.broad <- hlaDQA.broad[dat$DQA.A2.agroup]
+
+dat$DRB1.A1.broad <- hlaDRB1.broad[dat$DRB1.A1.agroup]
+dat$DRB1.A2.broad <- hlaDRB1.broad[dat$DRB1.A2.agroup]
+
+# update specific protein level (4 digit typing)
+# not all individuals have 4 digit typing...for those that don't, make NA
+dat$C1A1 <- with(dat, ifelse(nchar(C1A1) == 5, C1A1, NA))
+dat$C1A2 <- with(dat, ifelse(nchar(C1A2) == 5, C1A2, NA))
+
+dat$C1B1 <- with(dat, ifelse(nchar(C1B1) == 5, C1B1, NA))
+dat$C1B2 <- with(dat, ifelse(nchar(C1B2) == 5, C1B2, NA))
+
+dat$C1C1 <- with(dat, ifelse(nchar(C1C1) == 5, C1C1, NA))
+dat$C1C2 <- with(dat, ifelse(nchar(C1C2) == 5, C1C2, NA))
+
+dat$DQA.A1 <- with(dat, ifelse(nchar(DQA.A1) == 5, DQA.A1, NA))
+dat$DQA.A2 <- with(dat, ifelse(nchar(DQA.A2) == 5, DQA.A2, NA))
+
+dat$DRB1.A1 <- with(dat, ifelse(nchar(DRB1.A1) == 5, DRB1.A1, NA))
+dat$DRB1.A2 <- with(dat, ifelse(nchar(DRB1.A2) == 5, DRB1.A2, NA))
+
+
+##### Figure out Bw/C group status #####
+
+# HLA-Bw4
+dat$bw4.1 <- dat$C1A1.agroup %in% subset(hlaBw, hla == 'A' & bwGroup == 'Bw4')$allele
+dat$bw4.2 <- dat$C1A2.agroup %in% subset(hlaBw, hla == 'A' & bwGroup == 'Bw4')$allele
+dat$bw4.3 <- (dat$C1B1.agroup %in% subset(hlaBw, hla == 'B' & (bwGroup == 'Bw4' | is.na(bwGroup)))$allele |
+              dat$C1B1 %in% subset(hlaBw, hla == 'B' & bwGroup == 'Bw4')$allele) &
+             !dat$C1B1 %in% subset(hlaBw, hla == 'B' & bwGroup == 'Bw6' | is.na(bwGroup))$allele
+dat$bw4.4 <- (dat$C1B2.agroup %in% subset(hlaBw, hla == 'B' & (bwGroup == 'Bw4' | is.na(bwGroup)))$allele |
+              dat$C1B2 %in% subset(hlaBw, hla == 'B' & bwGroup == 'Bw4')$allele) &
+             !dat$C1B2 %in% subset(hlaBw, hla == 'B' & bwGroup == 'Bw6' | is.na(bwGroup))$allele
+
+dat$bw4 <- with(dat, bw4.1 | bw4.2 | bw4.3 | bw4.4)
+
+# HLA-Bw6
+dat$bw6.1 <- (dat$C1B1.agroup %in% subset(hlaBw, hla == 'B' & (bwGroup == 'Bw6' | is.na(bwGroup)))$allele |
+              dat$C1B1 %in% subset(hlaBw, hla == 'B' & bwGroup == 'Bw6')$allele) &
+             !dat$C1B1 %in% subset(hlaBw, hla == 'B' & bwGroup == 'Bw4' | is.na(bwGroup))$allele
+dat$bw6.2 <- (dat$C1B2.agroup %in% subset(hlaBw, hla == 'B' & (bwGroup == 'Bw6' | is.na(bwGroup)))$allele |
+              dat$C1B2 %in% subset(hlaBw, hla == 'B' & bwGroup == 'Bw6')$allele) &
+             !dat$C1B2 %in% subset(hlaBw, hla == 'B' & bwGroup == 'Bw4' | is.na(bwGroup))$allele
+
+dat$bw6 <- with(dat, bw6.1 | bw6.2)
+
+# HLA-C group 1
+dat$cg1.1 <- (dat$C1C1.agroup %in% subset(hlaCgrp, group == 'C1')$allele |
+              dat$C1C1 %in% subset(hlaCgrp, group == 'C1')$allele) &
+             !dat$C1C1 %in% subset(hlaCgrp, group == 'C2')$allele
+dat$cg1.2 <- (dat$C1C2.agroup %in% subset(hlaCgrp, group == 'C1')$allele |
+              dat$C1C2 %in% subset(hlaCgrp, group == 'C1')$allele) &
+             !dat$C1C2 %in% subset(hlaCgrp, group == 'C2')$allele
+
+dat$cg1 <- with(dat, cg1.1 | cg1.2)
+
+# HLA-C group 2
+dat$cg2.1 <- (dat$C1C1.agroup %in% subset(hlaCgrp, group == 'C2')$allele |
+              dat$C1C1 %in% subset(hlaCgrp, group == 'C2')$allele) &
+             !dat$C1C1 %in% subset(hlaCgrp, group == 'C1')$allele
+dat$cg2.2 <- (dat$C1C2.agroup %in% subset(hlaCgrp, group == 'C2')$allele |
+              dat$C1C2 %in% subset(hlaCgrp, group == 'C2')$allele) &
+             !dat$C1C2 %in% subset(hlaCgrp, group == 'C1')$allele
+
+dat$cg2 <- with(dat, cg2.1 | cg2.2)
+
+
+#####################
+# Goodness of Match #
+#####################
+
+# reset case-control status such that we have different ratios for now
+# ...to get an idea of what to expect in the end
+if(FALSE)
+{
+    set.seed(2934786)
+    ## dat$case <- sample(c(rep(FALSE, 130), rep(TRUE, 33))) # 1:4
+    ## dat$case <- sample(c(rep(FALSE, 122), rep(TRUE, 41))) # 1:3
+    dat$case <- sample(c(rep(FALSE, 109), rep(TRUE, 54))) # 1:2
+    ## dat$case <- sample(c(rep(FALSE, 82), rep(TRUE, 81))) # 1:1
+}
+
+ncase <- sum(dat$case)
+ncont <- sum(!dat$case)
+nvars <- ncase * ncont
+
+# position of cases/controls to help identify rows/columns associated with the individual
+dat$pos[dat$case] <- 1:ncase
+dat$pos[!dat$case] <- 1:ncont
+
+
+##### Set up integer linear program variables #####
+
+# vector to maximize (i.e. goodness of match)
+c <- rep(0, nvars)
+
+# contraints (i.e. make sure we match each case to one unique control)
+A <- matrix(0, nrow = ncase, ncol = nvars,
+            dimnames = list(1:ncase, 1:nvars))
+
+# right hand side of contraints (i.e. one control per case)
+b <- rep(1, ncase)
+
+
+##### Assign values to c and A #####
+for(i in 1:ncase)
+{
+    # label row for the ith case
+    cse <- which(dat$pos == i & dat$case)
+    rownames(A)[i] <- dat$PID[cse]
+
+    # we want one control for this case
+    A[i,((i-1)*ncont + 1):(i*ncont)] <- 1
+
+    for(j in 1:ncont)
+    {
+        # this is the column we are working with
+        column <- (i - 1)*ncont + j
+
+        # label column for the i:jth pairing
+        cnt <- which(dat$pos == j & !dat$case)
+        colnames(A)[column] <- with(dat, paste(PID[cse], PID[cnt], sep = ":"))
+        names(c)[column] <- with(dat, paste(PID[cse], PID[cnt], sep = ":"))
+
+        # Broad match score
+        c[column] <- c[column] + with(dat, sum(C1A1.broad[cse] == C1A1.broad[cnt] |
+                                               C1A1.broad[cse] == C1A2.broad[cnt],
+                                               C1A2.broad[cse] == C1A1.broad[cnt] |
+                                               C1A2.broad[cse] == C1A2.broad[cnt],
+                                               C1B1.broad[cse] == C1B1.broad[cnt] |
+                                               C1B1.broad[cse] == C1B2.broad[cnt],
+                                               C1B2.broad[cse] == C1B1.broad[cnt] |
+                                               C1B2.broad[cse] == C1B2.broad[cnt],
+                                               C1C1.broad[cse] == C1C1.broad[cnt] |
+                                               C1C1.broad[cse] == C1C2.broad[cnt],
+                                               C1C2.broad[cse] == C1C1.broad[cnt] |
+                                               C1C2.broad[cse] == C1C2.broad[cnt],
+                                               DRB1.A1.broad[cse] == DRB1.A1.broad[cnt] |
+                                               DRB1.A1.broad[cse] == DRB1.A2.broad[cnt],
+                                               DRB1.A2.broad[cse] == DRB1.A1.broad[cnt] |
+                                               DRB1.A2.broad[cse] == DRB1.A2.broad[cnt],
+                                               DQA.A1.broad[cse] == DQA.A1.broad[cnt] |
+                                               DQA.A1.broad[cse] == DQA.A2.broad[cnt],
+                                               DQA.A2.broad[cse] == DQA.A1.broad[cnt] |
+                                               DQA.A2.broad[cse] == DQA.A2.broad[cnt],
+                                               na.rm = TRUE))
+
+        # allele group match bonus
+        c[column] <- c[column] + 0.5 * with(dat, sum(C1A1.agroup[cse] == C1A1.agroup[cnt] |
+                                                     C1A1.agroup[cse] == C1A2.agroup[cnt],
+                                                     C1A2.agroup[cse] == C1A1.agroup[cnt] |
+                                                     C1A2.agroup[cse] == C1A2.agroup[cnt],
+                                                     C1B1.agroup[cse] == C1B1.agroup[cnt] |
+                                                     C1B1.agroup[cse] == C1B2.agroup[cnt],
+                                                     C1B2.agroup[cse] == C1B1.agroup[cnt] |
+                                                     C1B2.agroup[cse] == C1B2.agroup[cnt],
+                                                     C1C1.agroup[cse] == C1C1.agroup[cnt] |
+                                                     C1C1.agroup[cse] == C1C2.agroup[cnt],
+                                                     C1C2.agroup[cse] == C1C1.agroup[cnt] |
+                                                     C1C2.agroup[cse] == C1C2.agroup[cnt],
+                                                     DRB1.A1.agroup[cse] == DRB1.A1.agroup[cnt] |
+                                                     DRB1.A1.agroup[cse] == DRB1.A2.agroup[cnt],
+                                                     DRB1.A2.agroup[cse] == DRB1.A1.agroup[cnt] |
+                                                     DRB1.A2.agroup[cse] == DRB1.A2.agroup[cnt],
+                                                     DQA.A1.agroup[cse] == DQA.A1.agroup[cnt] |
+                                                     DQA.A1.agroup[cse] == DQA.A2.agroup[cnt],
+                                                     DQA.A2.agroup[cse] == DQA.A1.agroup[cnt] |
+                                                     DQA.A2.agroup[cse] == DQA.A2.agroup[cnt],
+                                                     na.rm = TRUE))
+
+        # specific protein match bonus
+        c[column] <- c[column] + 0.25 * with(dat, sum(C1A1.agroup[cse] == C1A1.agroup[cnt] |
+                                                      C1A1.agroup[cse] == C1A2.agroup[cnt],
+                                                      C1A2.agroup[cse] == C1A1.agroup[cnt] |
+                                                      C1A2.agroup[cse] == C1A2.agroup[cnt],
+                                                      C1B1.agroup[cse] == C1B1.agroup[cnt] |
+                                                      C1B1.agroup[cse] == C1B2.agroup[cnt],
+                                                      C1B2.agroup[cse] == C1B1.agroup[cnt] |
+                                                      C1B2.agroup[cse] == C1B2.agroup[cnt],
+                                                      C1C1.agroup[cse] == C1C1.agroup[cnt] |
+                                                      C1C1.agroup[cse] == C1C2.agroup[cnt],
+                                                      C1C2.agroup[cse] == C1C1.agroup[cnt] |
+                                                      C1C2.agroup[cse] == C1C2.agroup[cnt],
+                                                      DRB1.A1.agroup[cse] == DRB1.A1.agroup[cnt] |
+                                                      DRB1.A1.agroup[cse] == DRB1.A2.agroup[cnt],
+                                                      DRB1.A2.agroup[cse] == DRB1.A1.agroup[cnt] |
+                                                      DRB1.A2.agroup[cse] == DRB1.A2.agroup[cnt],
+                                                      DQA.A1.agroup[cse] == DQA.A1.agroup[cnt] |
+                                                      DQA.A1.agroup[cse] == DQA.A2.agroup[cnt],
+                                                      DQA.A2.agroup[cse] == DQA.A1.agroup[cnt] |
+                                                      DQA.A2.agroup[cse] == DQA.A2.agroup[cnt],
+                                                      na.rm = TRUE))
+
+        # Bw4/6 or C group mismatch penalty
+        c[column] <- c[column] - with(dat, sum(bw4[cse] != bw4[cnt],
+                                               bw6[cse] != bw6[cnt],
+                                               cg1[cse] != cg1[cnt],
+                                               cg2[cse] != cg2[cse],
+                                               na.rm = TRUE))
+    }
+}
+
+
+#########
+# Match #
+#########
+
+matches <- lp(direction = 'max', objective.in = c, const.mat = A, const.dir = rep("==", nvars),
+              const.rhs = b, all.bin = TRUE)
+
+hist(matches$objective[matches$solution == 1])
+summary(matches$objective[matches$solution == 1])
+
+# have to run this section by hand, changing the ratios above (at the beginning of the Goodness of Match section)
+if(FALSE)
+{
+    make.one.sheet <- function(mats)
+    {
+        cases <- sapply(strsplit(mats, ":"), `[`, 1)
+        conts <- sapply(strsplit(mats, ":"), `[`, 2)
+
+        retval <- subset(dat[as.vector(rbind(cases, conts)),],
+                         select = c('PID', 'C1A1', 'C1A2', 'C1B1', 'C1B2', 'C1C1', 'C1C2',
+                                    'DQA.A1', 'DQA.A2', 'DRB1.A1', 'DRB1.A2', 'C1A1.broad', 'C1A2.broad',
+                                    'C1B1.broad', 'C1B2.broad', 'C1C1.broad', 'C1C2.broad', 'DQA.A1.broad',
+                                    'DQA.A2.broad', 'DRB1.A1.broad', 'DRB1.A2.broad', 'bw4', 'bw6', 'cg1',
+                                    'cg2'))
+        retval$score <- NA
+        retval$score[1:length(mats) * 2 - 1] <- c[mats]
+
+        return(retval)
+    }
+
+    # matching of actual cases and controls ~ 1:1 matching
+    actual <- with(matches, names(objective)[solution == 1])
+    actual.df <- make.one.sheet(actual)
+
+    # 1:2 matching
+    one.two <- with(matches, names(objective)[solution == 1])
+    one.two.df <- make.one.sheet(one.two)
+
+    # 1:3 matching
+    one.three <- with(matches, names(objective)[solution == 1])
+    one.three.df <- make.one.sheet(one.three)
+
+    # 1:4 matching
+    one.four <- with(matches, names(objective)[solution == 1])
+    one.four.df <- make.one.sheet(one.four)
+
+    save(actual, actual.df, one.two, one.two.df, one.three, one.three.df,
+         one.four, one.four.df, file = 'testing.RData')
+
+
+    ##### put these matches into an excel spreadsheet #####
+    WriteXLS(c('actual.df', 'one.two.df', 'one.three.df', 'one.four.df'), 'matches.xlsx',
+             SheetNames = c('1 to 1', '1 to 2', '1 to 3', '1 to 4'))
+}

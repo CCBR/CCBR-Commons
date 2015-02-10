@@ -16,10 +16,10 @@ library(WriteXLS)
 #############
 
 ##### HLA data from Carrington lab #####
-dat <- read.xls('data/Cameroon_KS_HLA.xlsx', stringsAsFactors = FALSE, na.strings = c(''))
+dat <- read.xls('../data/Cameroon_KS_HLA.xlsx', stringsAsFactors = FALSE, na.strings = c(''))
 dat$PID <- gsub('_VOS', '', dat$PID)
 
-clin <- read.csv('data/ksbase.csv', stringsAsFactors = FALSE,
+clin <- read.csv('../data/ksbase.csv', stringsAsFactors = FALSE,
                  na.strings = c('Legitimate Skip', '-1', '88', '99'))
 clin$case <- with(clin, G1 == 2 & !is.na(F1) & A3 == 1)
 
@@ -148,10 +148,9 @@ dat$cg2 <- with(dat, cg2.1 | cg2.2)
 if(FALSE)
 {
     set.seed(2934786)
-    ## dat$case <- sample(c(rep(FALSE, 130), rep(TRUE, 33))) # 1:4
+    dat$case <- sample(c(rep(FALSE, 130), rep(TRUE, 33))) # 1:4
     ## dat$case <- sample(c(rep(FALSE, 122), rep(TRUE, 41))) # 1:3
-    dat$case <- sample(c(rep(FALSE, 109), rep(TRUE, 54))) # 1:2
-    ## dat$case <- sample(c(rep(FALSE, 82), rep(TRUE, 81))) # 1:1
+    ## dat$case <- sample(c(rep(FALSE, 109), rep(TRUE, 54))) # 1:2
 }
 
 ncase <- sum(dat$case)
@@ -169,11 +168,11 @@ dat$pos[!dat$case] <- 1:ncont
 c <- rep(0, nvars)
 
 # contraints (i.e. make sure we match each case to one unique control)
-A <- matrix(0, nrow = ncase, ncol = nvars,
-            dimnames = list(1:ncase, 1:nvars))
+A <- matrix(0, nrow = ncase + ncont, ncol = nvars,
+            dimnames = list(1:(ncase + ncont), 1:nvars))
 
-# right hand side of contraints (i.e. one control per case)
-b <- rep(1, ncase)
+# right hand side of contraints (i.e. one control per case, one or fewer matches per control)
+b <- rep(1, ncase + ncont)
 
 
 ##### Assign values to c and A #####
@@ -188,6 +187,9 @@ for(i in 1:ncase)
 
     for(j in 1:ncont)
     {
+        # we only want to match this control with at most one case
+        A[ncase + j,(i-1)*ncont + j] <- 1
+
         # this is the column we are working with
         column <- (i - 1)*ncont + j
 
@@ -279,7 +281,8 @@ for(i in 1:ncase)
 # Match #
 #########
 
-matches <- lp(direction = 'max', objective.in = c, const.mat = A, const.dir = rep("==", nvars),
+matches <- lp(direction = 'max', objective.in = c, const.mat = A,
+              const.dir = c(rep("==", ncase), rep("<=", ncont)),
               const.rhs = b, all.bin = TRUE)
 
 hist(matches$objective[matches$solution == 1])
@@ -322,10 +325,10 @@ if(FALSE)
     one.four.df <- make.one.sheet(one.four)
 
     save(actual, actual.df, one.two, one.two.df, one.three, one.three.df,
-         one.four, one.four.df, file = 'testing.RData')
+         one.four, one.four.df, file = '../output/testing.RData')
 
 
     ##### put these matches into an excel spreadsheet #####
-    WriteXLS(c('actual.df', 'one.two.df', 'one.three.df', 'one.four.df'), 'matches.xlsx',
+    WriteXLS(c('actual.df', 'one.two.df', 'one.three.df', 'one.four.df'), '../output/matches.xlsx',
              SheetNames = c('1 to 1', '1 to 2', '1 to 3', '1 to 4'))
 }

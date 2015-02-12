@@ -143,16 +143,6 @@ dat$cg2 <- with(dat, cg2.1 | cg2.2)
 # Goodness of Match #
 #####################
 
-# reset case-control status such that we have different ratios for now
-# ...to get an idea of what to expect in the end
-if(FALSE)
-{
-    set.seed(2934786)
-    dat$case <- sample(c(rep(FALSE, 130), rep(TRUE, 33))) # 1:4
-    ## dat$case <- sample(c(rep(FALSE, 122), rep(TRUE, 41))) # 1:3
-    ## dat$case <- sample(c(rep(FALSE, 109), rep(TRUE, 54))) # 1:2
-}
-
 ncase <- sum(dat$case)
 ncont <- sum(!dat$case)
 nvars <- ncase * ncont
@@ -271,48 +261,25 @@ matches <- lp(direction = 'max', objective.in = c, const.mat = A,
 hist(matches$objective[matches$solution == 1])
 summary(matches$objective[matches$solution == 1])
 
-# have to run this section by hand, changing the ratios above (at the beginning of the Goodness of Match section)
-if(FALSE)
+make.one.sheet <- function(mats)
 {
-    make.one.sheet <- function(mats)
-    {
-        cases <- sapply(strsplit(mats, ":"), `[`, 1)
-        conts <- sapply(strsplit(mats, ":"), `[`, 2)
+    cases <- sapply(strsplit(mats, ":"), `[`, 1)
+    conts <- sapply(strsplit(mats, ":"), `[`, 2)
 
-        retval <- subset(dat[as.vector(rbind(cases, conts)),],
-                         select = c('PID', 'C1A1', 'C1A2', 'C1B1', 'C1B2', 'C1C1', 'C1C2',
-                                    'DQA.A1', 'DQA.A2', 'DRB1.A1', 'DRB1.A2', 'C1A1.broad', 'C1A2.broad',
-                                    'C1B1.broad', 'C1B2.broad', 'C1C1.broad', 'C1C2.broad', 'DQA.A1.broad',
-                                    'DQA.A2.broad', 'DRB1.A1.broad', 'DRB1.A2.broad', 'bw4', 'bw6', 'cg1',
-                                    'cg2'))
-        retval$score <- NA
-        retval$score[1:length(mats) * 2 - 1] <- c[mats]
+    retval <- subset(dat[as.vector(rbind(cases, conts)),],
+                     select = c('PID', 'C1A1', 'C1A2', 'C1B1', 'C1B2', 'C1C1', 'C1C2',
+                         'DQA.A1', 'DQA.A2', 'DRB1.A1', 'DRB1.A2', 'C1A1.broad', 'C1A2.broad',
+                         'C1B1.broad', 'C1B2.broad', 'C1C1.broad', 'C1C2.broad', 'DQA.A1.broad',
+                         'DQA.A2.broad', 'DRB1.A1.broad', 'DRB1.A2.broad', 'bw4', 'bw6', 'cg1',
+                         'cg2'))
+    retval$score <- NA
+    retval$score[1:length(mats) * 2 - 1] <- c[mats]
 
-        return(retval)
-    }
-
-    # matching of actual cases and controls ~ 1:1 matching
-    actual <- with(matches, objective[solution == 1])
-    actual.df <- make.one.sheet(names(actual))
-    picked.df <- make.one.sheet(names(actual[order(-actual)][1:16]))
-
-    # 1:2 matching
-    one.two <- with(matches, names(objective)[solution == 1])
-    one.two.df <- make.one.sheet(one.two)
-
-    # 1:3 matching
-    one.three <- with(matches, names(objective)[solution == 1])
-    one.three.df <- make.one.sheet(one.three)
-
-    # 1:4 matching
-    one.four <- with(matches, names(objective)[solution == 1])
-    one.four.df <- make.one.sheet(one.four)
-
-    save(actual, actual.df, one.two, one.two.df, one.three, one.three.df,
-         one.four, one.four.df, file = '../output/testing.RData')
-
-
-    ##### put these matches into an excel spreadsheet #####
-    WriteXLS(c('actual.df', 'one.two.df', 'one.three.df', 'one.four.df'), '../output/matches.xlsx',
-             SheetNames = c('1 to 1', '1 to 2', '1 to 3', '1 to 4'))
+    return(retval)
 }
+
+# matching of actual cases and controls ~ 1:1 matching
+actual <- with(matches, objective[solution == 1])
+actual.df <- make.one.sheet(names(actual))
+picked.df <- make.one.sheet(names(actual[order(-actual)][1:16]))
+

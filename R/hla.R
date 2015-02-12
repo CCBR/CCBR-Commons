@@ -283,3 +283,5 @@ actual <- with(matches, objective[solution == 1])
 actual.df <- make.one.sheet(names(actual))
 picked.df <- make.one.sheet(names(actual[order(-actual)][1:16]))
 
+write.table(names(actual)[1:16], 'hla_matched.txt', row.names = FALSE, col.names = FALSE,
+            quote = FALSE)

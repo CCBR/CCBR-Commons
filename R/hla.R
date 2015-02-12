@@ -5,7 +5,7 @@
 # Advanced Biomedical Computing Center at Frederick National Laboratory
 # Leidos Biomedical Research, Inc
 # Created January 30, 2015
-# Last Modified February 5, 2015
+# Last Modified February 12, 2015
 
 library(gdata)
 library(lpSolve)
@@ -21,7 +21,7 @@ dat$PID <- gsub('_VOS', '', dat$PID)
 
 clin <- read.csv('../data/ksbase.csv', stringsAsFactors = FALSE,
                  na.strings = c('Legitimate Skip', '-1', '88', '99'))
-clin$case <- with(clin, G1 == 2 & !is.na(F1) & A3 == 1)
+clin$case <- with(clin, substr(ID, 1, 1) == 'K')
 
 dat <- merge(dat, subset(clin, select = c('ID', 'case')), by.x = 'PID', by.y = 'ID')
 
@@ -176,6 +176,17 @@ b <- rep(1, ncase + ncont)
 
 
 ##### Assign values to c and A #####
+compare.two.genes <- function(a1, a2, b1, b2)
+{
+    # individual in {a, b}
+    # allele in {1, 2}
+
+    comp <- c(sum((a1 == b1) + (a2 == b2), na.rm = TRUE),
+              sum((a1 == b2) + (a2 == b1), na.rm = TRUE))
+
+    return(max(comp))
+}
+
 for(i in 1:ncase)
 {
     # label row for the ith case
@@ -199,80 +210,50 @@ for(i in 1:ncase)
         names(c)[column] <- with(dat, paste(PID[cse], PID[cnt], sep = ":"))
 
         # Broad match score
-        c[column] <- c[column] + with(dat, sum(C1A1.broad[cse] == C1A1.broad[cnt] |
-                                               C1A1.broad[cse] == C1A2.broad[cnt],
-                                               C1A2.broad[cse] == C1A1.broad[cnt] |
-                                               C1A2.broad[cse] == C1A2.broad[cnt],
-                                               C1B1.broad[cse] == C1B1.broad[cnt] |
-                                               C1B1.broad[cse] == C1B2.broad[cnt],
-                                               C1B2.broad[cse] == C1B1.broad[cnt] |
-                                               C1B2.broad[cse] == C1B2.broad[cnt],
-                                               C1C1.broad[cse] == C1C1.broad[cnt] |
-                                               C1C1.broad[cse] == C1C2.broad[cnt],
-                                               C1C2.broad[cse] == C1C1.broad[cnt] |
-                                               C1C2.broad[cse] == C1C2.broad[cnt],
-                                               DRB1.A1.broad[cse] == DRB1.A1.broad[cnt] |
-                                               DRB1.A1.broad[cse] == DRB1.A2.broad[cnt],
-                                               DRB1.A2.broad[cse] == DRB1.A1.broad[cnt] |
-                                               DRB1.A2.broad[cse] == DRB1.A2.broad[cnt],
-                                               DQA.A1.broad[cse] == DQA.A1.broad[cnt] |
-                                               DQA.A1.broad[cse] == DQA.A2.broad[cnt],
-                                               DQA.A2.broad[cse] == DQA.A1.broad[cnt] |
-                                               DQA.A2.broad[cse] == DQA.A2.broad[cnt],
+        c[column] <- c[column] + with(dat, sum(compare.two.genes(C1A1.broad[cse], C1A2.broad[cse],
+                                                                 C1A1.broad[cnt], C1A2.broad[cnt]),
+                                               compare.two.genes(C1B1.broad[cse], C1B2.broad[cse],
+                                                                 C1B1.broad[cnt], C1B2.broad[cnt]),
+                                               compare.two.genes(C1C1.broad[cse], C1C2.broad[cse],
+                                                                 C1C1.broad[cnt], C1C2.broad[cnt]),
+                                               compare.two.genes(DRB1.A1.broad[cse], DRB1.A2.broad[cse],
+                                                                 DRB1.A1.broad[cnt], DRB1.A2.broad[cnt]),
+                                               compare.two.genes(DQA.A1.broad[cse], DQA.A2.broad[cse],
+                                                                 DQA.A1.broad[cnt], DQA.A2.broad[cnt]),
                                                na.rm = TRUE))
 
         # allele group match bonus
-        c[column] <- c[column] + 0.5 * with(dat, sum(C1A1.agroup[cse] == C1A1.agroup[cnt] |
-                                                     C1A1.agroup[cse] == C1A2.agroup[cnt],
-                                                     C1A2.agroup[cse] == C1A1.agroup[cnt] |
-                                                     C1A2.agroup[cse] == C1A2.agroup[cnt],
-                                                     C1B1.agroup[cse] == C1B1.agroup[cnt] |
-                                                     C1B1.agroup[cse] == C1B2.agroup[cnt],
-                                                     C1B2.agroup[cse] == C1B1.agroup[cnt] |
-                                                     C1B2.agroup[cse] == C1B2.agroup[cnt],
-                                                     C1C1.agroup[cse] == C1C1.agroup[cnt] |
-                                                     C1C1.agroup[cse] == C1C2.agroup[cnt],
-                                                     C1C2.agroup[cse] == C1C1.agroup[cnt] |
-                                                     C1C2.agroup[cse] == C1C2.agroup[cnt],
-                                                     DRB1.A1.agroup[cse] == DRB1.A1.agroup[cnt] |
-                                                     DRB1.A1.agroup[cse] == DRB1.A2.agroup[cnt],
-                                                     DRB1.A2.agroup[cse] == DRB1.A1.agroup[cnt] |
-                                                     DRB1.A2.agroup[cse] == DRB1.A2.agroup[cnt],
-                                                     DQA.A1.agroup[cse] == DQA.A1.agroup[cnt] |
-                                                     DQA.A1.agroup[cse] == DQA.A2.agroup[cnt],
-                                                     DQA.A2.agroup[cse] == DQA.A1.agroup[cnt] |
-                                                     DQA.A2.agroup[cse] == DQA.A2.agroup[cnt],
+        c[column] <- c[column] + 0.5 * with(dat, sum(compare.two.genes(C1A1.agroup[cse], C1A2.agroup[cse],
+                                                                       C1A1.agroup[cnt], C1A2.agroup[cnt]),
+                                                     compare.two.genes(C1B1.agroup[cse], C1B2.agroup[cse],
+                                                                       C1B1.agroup[cnt], C1B2.agroup[cnt]),
+                                                     compare.two.genes(C1C1.agroup[cse], C1C2.agroup[cse],
+                                                                       C1C1.agroup[cnt], C1C2.agroup[cnt]),
+                                                     compare.two.genes(DRB1.A1.agroup[cse], DRB1.A2.agroup[cse],
+                                                                       DRB1.A1.agroup[cnt], DRB1.A2.agroup[cnt]),
+                                                     compare.two.genes(DQA.A1.agroup[cse], DQA.A2.agroup[cse],
+                                                                       DQA.A1.agroup[cnt], DQA.A2.agroup[cnt]),
                                                      na.rm = TRUE))
 
         # specific protein match bonus
-        c[column] <- c[column] + 0.25 * with(dat, sum(C1A1.agroup[cse] == C1A1.agroup[cnt] |
-                                                      C1A1.agroup[cse] == C1A2.agroup[cnt],
-                                                      C1A2.agroup[cse] == C1A1.agroup[cnt] |
-                                                      C1A2.agroup[cse] == C1A2.agroup[cnt],
-                                                      C1B1.agroup[cse] == C1B1.agroup[cnt] |
-                                                      C1B1.agroup[cse] == C1B2.agroup[cnt],
-                                                      C1B2.agroup[cse] == C1B1.agroup[cnt] |
-                                                      C1B2.agroup[cse] == C1B2.agroup[cnt],
-                                                      C1C1.agroup[cse] == C1C1.agroup[cnt] |
-                                                      C1C1.agroup[cse] == C1C2.agroup[cnt],
-                                                      C1C2.agroup[cse] == C1C1.agroup[cnt] |
-                                                      C1C2.agroup[cse] == C1C2.agroup[cnt],
-                                                      DRB1.A1.agroup[cse] == DRB1.A1.agroup[cnt] |
-                                                      DRB1.A1.agroup[cse] == DRB1.A2.agroup[cnt],
-                                                      DRB1.A2.agroup[cse] == DRB1.A1.agroup[cnt] |
-                                                      DRB1.A2.agroup[cse] == DRB1.A2.agroup[cnt],
-                                                      DQA.A1.agroup[cse] == DQA.A1.agroup[cnt] |
-                                                      DQA.A1.agroup[cse] == DQA.A2.agroup[cnt],
-                                                      DQA.A2.agroup[cse] == DQA.A1.agroup[cnt] |
-                                                      DQA.A2.agroup[cse] == DQA.A2.agroup[cnt],
+        c[column] <- c[column] + 0.25 * with(dat, sum(compare.two.genes(C1A1[cse], C1A2[cse],
+                                                                        C1A1[cnt], C1A2[cnt]),
+                                                      compare.two.genes(C1B1[cse], C1B2[cse],
+                                                                        C1B1[cnt], C1B2[cnt]),
+                                                      compare.two.genes(C1C1[cse], C1C2[cse],
+                                                                        C1C1[cnt], C1C2[cnt]),
+                                                      compare.two.genes(DRB1.A1[cse], DRB1.A2[cse],
+                                                                        DRB1.A1[cnt], DRB1.A2[cnt]),
+                                                      compare.two.genes(DQA.A1[cse], DQA.A2[cse],
+                                                                        DQA.A1[cnt], DQA.A2[cnt]),
                                                       na.rm = TRUE))
 
         # Bw4/6 or C group mismatch penalty
-        c[column] <- c[column] - with(dat, sum(bw4[cse] != bw4[cnt],
-                                               bw6[cse] != bw6[cnt],
-                                               cg1[cse] != cg1[cnt],
-                                               cg2[cse] != cg2[cse],
-                                               na.rm = TRUE))
+        c[column] <- c[column] - 2 * with(dat, sum(bw4[cse] != bw4[cnt],
+                                                   bw6[cse] != bw6[cnt],
+                                                   cg1[cse] != cg1[cnt],
+                                                   cg2[cse] != cg2[cse],
+                                                   na.rm = TRUE))
     }
 }
 
@@ -281,8 +262,10 @@ for(i in 1:ncase)
 # Match #
 #########
 
+set.seed(928374)
 matches <- lp(direction = 'max', objective.in = c, const.mat = A,
-              const.dir = c(rep("==", ncase), rep("<=", ncont)),
+              ## const.dir = c(rep("==", ncase), rep("<=", ncont)),
+              const.dir = rep("<=", ncase + ncont), # no more than one match per person
               const.rhs = b, all.bin = TRUE)
 
 hist(matches$objective[matches$solution == 1])
@@ -309,8 +292,9 @@ if(FALSE)
     }
 
     # matching of actual cases and controls ~ 1:1 matching
-    actual <- with(matches, names(objective)[solution == 1])
-    actual.df <- make.one.sheet(actual)
+    actual <- with(matches, objective[solution == 1])
+    actual.df <- make.one.sheet(names(actual))
+    picked.df <- make.one.sheet(names(actual[order(-actual)][1:16]))
 
     # 1:2 matching
     one.two <- with(matches, names(objective)[solution == 1])

@@ -1,11 +1,2 @@
-Data/
-Results/
-*.xls
-*.xlsx
-*.sam
-*.fastq
-*.bam
-*.bai
-*.RData
 *~
 Icon*

@@ -1,5 +1,7 @@
 Data/
+Data
 Results/
+Results
 *.xls
 *.xlsx
 *.sam

@@ -1,7 +1,7 @@
 # CCBR-Commons
 This is a place for all CCBR analysts to share code associated with specific projects and also generally useful scripts with others in the CCBR.
 
-Please ensure that some minimal amount of documentation is provided in the header of your script. For those that would like to provide addtional information, add a git markdown (see https://help.github.com/articles/markdown-basics/) or html file to the gh-pages branch, which will be displayed at http://ccbr.github.io/CCBR-Commons (see also http://ccbr.github.io/CCBR-Commons/git.md for Randy's Git tutorial).
+Please ensure that some minimal amount of documentation is provided in the header of your script. For those that would like to provide addtional information, add a git markdown (see https://help.github.com/articles/markdown-basics/) or html file to the gh-pages branch, which will be displayed at http://ccbr.github.io/CCBR-Commons (also see [Randy's Git tutorial](https://github.com/CCBR/CCBR-Commons/blob/master/git.md)).
 
 The following directories are currently in use:
 * Exome - Scripts for QC, Analysis and Figures

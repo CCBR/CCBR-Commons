@@ -86,3 +86,15 @@ for(j in map$SNPName)
 
 write.table(ped, file = '../Data/nphs2.ped', sep = '\t', quote = FALSE, na = '0', row.names = FALSE,
             col.names = FALSE)
+
+
+######### Run PLINK #########
+
+system('./checkIBD_F')
+
+
+######### Look at results before sending #########
+
+tmp <- read.table('../Results/plink.het', header = TRUE)
+
+hist(sapply(tmp$F, function(x) max(x,0)), xlab = 'F', main = 'Histogram of F')

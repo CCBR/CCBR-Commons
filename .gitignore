@@ -5,11 +5,16 @@ Results
 *.xls
 *.xlsx
 *.sam
+*.fa
+*.fasta
 *.fastq
+*.fai
 *.bam
 *.bai
+*.gds
 *.RData
 *.Rhistory
 *~
+^#
 plink.log
 Icon*

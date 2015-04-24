@@ -46,6 +46,10 @@ dat <- subset(dat, !rowID %in% names(tmp))
 
 rm(dat2)
 
+# make sure we drop NPHS2 and the surrounding region
+nphs2 <- 179535000
+dat <- subset(dat, !(Chr == 1 & Position > nphs2 - 1.5e6 & Position < nphs2 + 1.5e6))
+
 
 ######### MAP file #########
 
@@ -62,30 +66,33 @@ write.table(map, file = '../Data/nphs2.map', sep = '\t', quote = FALSE, na = '0'
 
 ######### PED file #########
 
-ped <- data.frame(family = unique(dat$SampleID),
-                  indiv = NA,
+ped <- data.frame(family = NA,
+                  indiv = unique(dat$SampleID),
                   father = NA,
                   mother = NA,
                   sex = 'other',
                   pheno = 1,
                   stringsAsFactors = FALSE)
 
-ped$indiv <- paste('I', ped$family, sep = '')
+ped$family <- paste('F', ped$indiv, sep = '')
 ped$father <- paste('D', ped$indiv, sep = '')
 ped$mother <- paste('M', ped$indiv, sep = '')
 
-# this will be painfully slow, but it will save a lot of coding/thinking time.... :P
+# create a matrix of geontypes to be cbound to ped
+pedmat <- matrix(NA, nrow = dim(ped)[1], ncol = dim(map)[1],
+                 dimnames = list(ped$indiv, map$SNPName))
+
 for(j in map$SNPName)
 {
     tmp <- subset(dat, SNPName == j, select = c(SampleID, Allele1, Allele2))
-    names(tmp) <- c('SampleID', paste(j, 1:2, sep = '.'))
-
-    # merge by familyID so that the columns remain ordered correctly...minor point since they are all unique
-    ped <- merge(ped, tmp, all = TRUE, by.x = 'family', by.y = 'SampleID')
+    pedmat[tmp$SampleID,j] <- with(tmp, paste(Allele1, Allele2, sep = '\t'))
 }
 
-write.table(ped, file = '../Data/nphs2.ped', sep = '\t', quote = FALSE, na = '0', row.names = FALSE,
-            col.names = FALSE)
+pedmat[is.na(pedmat)] <- '0\t0'
+tmp <- apply(pedmat, 1, paste, collapse = '\t')
+
+write.table(cbind(ped, tmp), file = '../Data/nphs2.ped', sep = '\t', quote = FALSE, na = '0',
+            row.names = FALSE, col.names = FALSE)
 
 
 ######### Run PLINK #########
@@ -93,8 +100,30 @@ write.table(ped, file = '../Data/nphs2.ped', sep = '\t', quote = FALSE, na = '0'
 system('./checkIBD_F')
 
 
+######### People Cherie is interested in #########
+
+## ids <- c('NC046', 'SA015', 'SA036', 'SA048', 'SA054', 'SA088', 'SA089')
+## ids <- c('WNK03426', 'WNK03427', 'WNK03385', 'WNK03379', 'WNK03367', 'WNK03347', 'WNK08583')
+## ids <- c('NR043226', 'NR043225', 'NR043206', 'NR043200', 'NR043188', 'NR043168', 'NR051111')
+ids <- c('CL300052', 'CL300045', 'CL300049', 'CL300043', 'CL300062', 'CL300041', 'WNK03347',
+         'WNK03367', 'WNK03374', 'WNK03379', 'WNK03385', 'WNK03392', 'WNK03426', 'WNK03427')
+
+
 ######### Look at results before sending #########
 
 tmp <- read.table('../Results/plink.het', header = TRUE)
-
 hist(sapply(tmp$F, function(x) max(x,0)), xlab = 'F', main = 'Histogram of F')
+
+tmp <- read.table('../Results/plink.genome', header = TRUE)
+with(tmp, plot(Z0, Z1, xlim = 0:1, ylim = 0:1))
+abline(1, -1)
+
+# using the IDs below...
+tmp$flag1 <- FALSE
+tmp$flag1[unlist(sapply(ids, grep, x = tmp$IID1))] <- TRUE
+tmp$flag2 <- FALSE
+tmp$flag2[unlist(sapply(ids, grep, x = tmp$IID2))] <- TRUE
+
+tmp$flag <- tmp$flag1 & tmp$flag2
+with(subset(tmp, flag), plot(Z0, Z1, xlim = 0:1, ylim = 0:1))
+abline(1, -1)

@@ -111,7 +111,11 @@ ids <- c('CL300052', 'CL300045', 'CL300049', 'CL300043', 'CL300062', 'CL300041',
 
 ######### Look at results before sending #########
 
-tmp <- read.table('../Results/plink.het', header = TRUE)
+tmp <- read.table('../Results/plink.het', header = TRUE, stringsAsFactors = FALSE)
+
+# see F for the ids above
+unlist(lapply(ids, funtion(i) tmp[grep(i, tmp$IID),'F']))
+
 hist(sapply(tmp$F, function(x) max(x,0)), xlab = 'F', main = 'Histogram of F')
 
 tmp <- read.table('../Results/plink.genome', header = TRUE)

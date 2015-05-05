@@ -114,7 +114,8 @@ ids <- c('CL300052', 'CL300045', 'CL300049', 'CL300043', 'CL300062', 'CL300041',
 tmp <- read.table('../Results/plink.het', header = TRUE, stringsAsFactors = FALSE)
 
 # see F for the ids above
-unlist(lapply(ids, funtion(i) tmp[grep(i, tmp$IID),'F']))
+v260eHom <- lapply(ids, function(i) tmp[grep(i, tmp$IID),'F'])
+names(v260eHom) <- ids
 
 hist(sapply(tmp$F, function(x) max(x,0)), xlab = 'F', main = 'Histogram of F')
 

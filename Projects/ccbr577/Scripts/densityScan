@@ -1,0 +1,132 @@
+#! /usr/bin/Rscript
+# densityScan.Rscript
+# Scan HITseq results for density peaks
+# Randy Johnson
+# CCR Collaborative Bioinformatics Resource at Frederick National Laboratory
+# Leidos Biomedical Research, Inc
+
+
+library(doBy)
+library(MASS)
+
+
+# parse arguments
+vars <- commandArgs(TRUE)
+
+tmp <- strsplit(vars, '=')
+
+vars <- as.list(sapply(tmp, `[`, 2))
+names(vars) <- sapply(tmp, `[`, 1)
+
+
+##### defaults #####
+
+# organism
+if(is.null(vars$org))
+    vars$org <- 'mouse'
+
+# sex chromosomes
+Xchrom <- c(mouse = 20, human = 23)
+Ychrom <- c(mouse = 21, human = 24)
+
+if(is.null(vars$X))
+    vars$X <- Xchrom[vars$org]
+
+if(is.null(vars$Y))
+    vars$Y <- Ychrom[vars$org]
+
+if(is.null(vars$peakThresh))
+    vars$peakThresh <- 1/3
+
+
+##### Data #####
+
+# read in
+dat <- read.table(vars$i, sep = '\t', skip = 1, comment.char = '', stringsAsFactors = FALSE)
+names(dat) <- c('chrChar', 'start', 'end', 'info', 'zero', 'strand', 'start2', 'end2', 'color')
+
+# pull chromosome numbers and sort properly
+tmp <- gsub('chr', '', dat$chrChar)
+dat$chr <- as.numeric(ifelse(tmp == 'X', vars$X,
+                      ifelse(tmp == 'Y', vars$Y, tmp)))
+
+dat <- dat[order(dat$chr, dat$start),]
+
+# calculate genomic position
+maxPos <- summaryBy(end ~ chr, data = dat, FUN = max)
+maxPos$end.max <- maxPos$end.max + 2e6 # put at least 2 Mb between chromosomes
+
+maxPos <- merge(maxPos, data.frame(chr = 1:max(maxPos$chr)), all = TRUE)
+maxPos$end.max[is.na(maxPos$end.max)] <- 0
+
+maxPos$add <- cumsum(c(0,maxPos$end.max[-dim(maxPos)[1]]))
+
+dat$pos <- dat$start + maxPos$add[dat$chr]
+
+
+##### Density #####
+
+# calculate density - make sure we have a sample point at least as often as bw is wide
+dens <- density(dat$pos, bw = 1e3, n = 2^ceiling(log(max(dat$pos) / 1e3, 2)))
+
+## # find peak threshold
+## norm <- sum(dens$y)
+## tmp <- function(t) sum(dens$y[dens$y > t]) / norm
+## thresh <- uniroot(function(t) vars$peakThresh - sum(dens$y[dens$y > t]) / norm, interval = c(0, 1))
+
+# points within peaks
+dens$peak <- with(dens, (y / max(y)) > vars$peakThresh)
+
+# peak start
+dens$start <- c(FALSE, with(dens, peak[-1] & !peak[-length(peak)]))
+
+# peak end
+dens$end <- c(with(dens, peak[-length(peak)] & !peak[-1]), FALSE)
+
+# grab peaks
+peaks <- data.frame(midpoint = (dens$x[dens$start] + dens$x[dens$end]) / 2,
+                    start = NA,
+                    end = NA)
+
+for(i in 1:dim(peaks)[1])
+{
+    # find boundaries of peak
+    start <- which(dens$start)[i]
+    end <- which(dens$end)[i]
+
+    maxy <- max(dens$y)
+
+    # expand a little
+    while(dens$y[start] / maxy > 0.2)
+        start <- start - 1
+
+    while(dens$y[end] / maxy > 0.2)
+        end <- end + 1
+
+    peaks$start[i] <- dens$x[start]
+    peaks$end[i] <- dens$x[end]
+}
+
+# some figures to look at (temporary stuff here)
+## m <- which.max(dens$y)
+## w <- 20
+## tmp <- m + -w:w
+## with(dens, plot(x[tmp], y[tmp] / max(y), type = 'l'))
+## with(dens, lines(x[tmp][peak[tmp]], y[tmp][peak[tmp]] / max(y), col = 'red'))
+## with(dens, points(x[tmp][start[tmp]], y[tmp][start[tmp]] / max(y), col = 'red', pch = 20))
+## with(dens, points(x[tmp][end[tmp]], y[tmp][end[tmp]] / max(y), col = 'red', pch = 20))
+
+## with(subset(dat, pos > min(dens$x[tmp]) & pos < max(dens$x[tmp])),
+##      points(pos, rep(par()$usr[3], length(pos)), pch = '|', col = 'green3'))
+## with(subset(dat, pos > min(dens$x[tmp]) & pos < max(dens$x[tmp])),
+##      points(pos + end - start, rep(par()$usr[3], length(pos)), pch = '|', col = 'red'))
+## abline(h = vars$peakThresh, lty = 2)
+
+
+
+
+## with(dens, plot(x, y / max(y), col = ifelse(peak, 'red', 'black')))
+
+
+##### Export bed File #####
+

@@ -21,6 +21,23 @@ names(vars) <- sapply(tmp, `[`, 1)
 
 ##### defaults #####
 
+# input file
+if(is.null(vars$i))
+    stop("Input file (i) required")
+if(!file.exists(vars$i))
+    stop(paste("Input file,", vars$i, "not found."))
+
+# output file
+if(is.null(vars$o))
+    vars$o <- gsub('Data', 'Results', gsub('.bed', '_peaks.bed', vars$i))
+
+# track name
+if(is.null(vars$n))
+{
+    vars$n <- strsplit(vars$i, '/')[[1]]
+    vars$n <- strsplit(vars$n[[length(vars$n)]], '.', fixed = TRUE)[[1]][1]
+}
+
 # organism
 if(is.null(vars$org))
     vars$org <- 'mouse'
@@ -35,8 +52,13 @@ if(is.null(vars$X))
 if(is.null(vars$Y))
     vars$Y <- Ychrom[vars$org]
 
+# peak must reach this threshold in order to be counted
 if(is.null(vars$peakThresh))
     vars$peakThresh <- 1/3
+
+# where we cutoff the edge of the peak
+if(is.null(vars$peakBoundary))
+    vars$peakBoundary <- 0.2
 
 
 ##### Data #####
@@ -78,55 +100,68 @@ dens <- density(dat$pos, bw = 1e3, n = 2^ceiling(log(max(dat$pos) / 1e3, 2)))
 dens$peak <- with(dens, (y / max(y)) > vars$peakThresh)
 
 # peak start
-dens$start <- c(FALSE, with(dens, peak[-1] & !peak[-length(peak)]))
+dens$thickStart <- c(FALSE, with(dens, peak[-1] & !peak[-length(peak)]))
 
 # peak end
-dens$end <- c(with(dens, peak[-length(peak)] & !peak[-1]), FALSE)
+dens$thickEnd <- c(with(dens, peak[-length(peak)] & !peak[-1]), FALSE)
 
 # grab peaks
-peaks <- data.frame(midpoint = (dens$x[dens$start] + dens$x[dens$end]) / 2,
+peaks <- data.frame(midpoint = (dens$x[dens$thickStart] + dens$x[dens$thickEnd]) / 2,
                     start = NA,
-                    end = NA)
+                    end = NA,
+                    thickStart = NA,
+                    thickEnd = NA)
 
 for(i in 1:dim(peaks)[1])
 {
     # find boundaries of peak
-    start <- which(dens$start)[i]
-    end <- which(dens$end)[i]
+    thickStart <- which(dens$thickStart)[i]
+    start <- thickStart
+
+    thickEnd <- which(dens$thickEnd)[i]
+    end <- thickEnd
 
     maxy <- max(dens$y)
 
     # expand a little
-    while(dens$y[start] / maxy > 0.2)
+    while(dens$y[start] / maxy > vars$peakBoundary)
         start <- start - 1
 
-    while(dens$y[end] / maxy > 0.2)
+    while(dens$y[end] / maxy > vars$peakBoundary)
         end <- end + 1
 
-    peaks$start[i] <- dens$x[start]
-    peaks$end[i] <- dens$x[end]
+    peaks$start[i] <- round(dens$x[start])
+    peaks$thickStart[i] <- round(dens$x[thickStart])
+    peaks$end[i] <- round(dens$x[end])
+    peaks$thickEnd[i] <- round(dens$x[thickEnd])
 }
 
-# some figures to look at (temporary stuff here)
-## m <- which.max(dens$y)
-## w <- 20
-## tmp <- m + -w:w
-## with(dens, plot(x[tmp], y[tmp] / max(y), type = 'l'))
-## with(dens, lines(x[tmp][peak[tmp]], y[tmp][peak[tmp]] / max(y), col = 'red'))
-## with(dens, points(x[tmp][start[tmp]], y[tmp][start[tmp]] / max(y), col = 'red', pch = 20))
-## with(dens, points(x[tmp][end[tmp]], y[tmp][end[tmp]] / max(y), col = 'red', pch = 20))
+# add chromosome
+peaks$chr <- sapply(peaks$midpoint, function(m) sum(m > maxPos$add))
+peaks$chrChar <- paste('chr', peaks$chr, sep = '')
 
-## with(subset(dat, pos > min(dens$x[tmp]) & pos < max(dens$x[tmp])),
-##      points(pos, rep(par()$usr[3], length(pos)), pch = '|', col = 'green3'))
-## with(subset(dat, pos > min(dens$x[tmp]) & pos < max(dens$x[tmp])),
-##      points(pos + end - start, rep(par()$usr[3], length(pos)), pch = '|', col = 'red'))
-## abline(h = vars$peakThresh, lty = 2)
+# translate positions
+peaks$start <- peaks$start - maxPos$add[peaks$chr]
+peaks$thickStart <- peaks$thickStart - maxPos$add[peaks$chr]
+peaks$end <- peaks$end - maxPos$add[peaks$chr]
+peaks$thickEnd <- peaks$thickEnd - maxPos$add[peaks$chr]
 
-
-
-
-## with(dens, plot(x, y / max(y), col = ifelse(peak, 'red', 'black')))
+# add other info
+peaks$name <- paste('peak', 1:dim(peaks)[1], sep = '')
+peaks$score <- 0
+peaks$strand <- '+' ##################################### We should fix this -- just calling them all + now
 
 
 ##### Export bed File #####
 
+# peaks track
+cat('track name=', vars$n, '_peaks\n', sep = '', file = vars$o)
+write.table(subset(peaks, select = c('chrChar', 'start', 'end', 'name', 'score',
+                                     'strand', 'thickStart', 'thickEnd')),
+            file = vars$o, append = TRUE, quote = FALSE, sep = '\t', row.names = FALSE, col.names = FALSE)
+
+# insertions track
+cat('\ntrack name=', vars$n, '\n', sep = '', file = vars$o, append = TRUE)
+write.table(subset(dat, select = c('chrChar', 'start', 'end', 'info', 'zero', 'strand',
+                                   'start2', 'end2', 'color')),
+            file = vars$o, append = TRUE, quote = FALSE, sep = '\t', row.names = FALSE, col.names = FALSE)

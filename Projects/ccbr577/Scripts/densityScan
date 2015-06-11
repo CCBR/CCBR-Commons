@@ -91,11 +91,6 @@ dat$pos <- dat$start + maxPos$add[dat$chr]
 # calculate density - make sure we have a sample point at least as often as bw is wide
 dens <- density(dat$pos, bw = 1e3, n = 2^ceiling(log(max(dat$pos) / 1e3, 2)))
 
-## # find peak threshold
-## norm <- sum(dens$y)
-## tmp <- function(t) sum(dens$y[dens$y > t]) / norm
-## thresh <- uniroot(function(t) vars$peakThresh - sum(dens$y[dens$y > t]) / norm, interval = c(0, 1))
-
 # points within peaks
 dens$peak <- with(dens, (y / max(y)) > vars$peakThresh)
 
@@ -138,7 +133,9 @@ for(i in 1:dim(peaks)[1])
 
 # add chromosome
 peaks$chr <- sapply(peaks$midpoint, function(m) sum(m > maxPos$add))
-peaks$chrChar <- paste('chr', peaks$chr, sep = '')
+peaks$chrChar <- ifelse(peaks$chr == vars$X, 'chrX',
+                 ifelse(peaks$chr == vars$Y, 'chrY',
+                                             paste('chr', peaks$chr, sep = '')))
 
 # translate positions
 peaks$start <- peaks$start - maxPos$add[peaks$chr]
@@ -160,8 +157,8 @@ write.table(subset(peaks, select = c('chrChar', 'start', 'end', 'name', 'score',
                                      'strand', 'thickStart', 'thickEnd')),
             file = vars$o, append = TRUE, quote = FALSE, sep = '\t', row.names = FALSE, col.names = FALSE)
 
-# insertions track
-cat('\ntrack name=', vars$n, '\n', sep = '', file = vars$o, append = TRUE)
-write.table(subset(dat, select = c('chrChar', 'start', 'end', 'info', 'zero', 'strand',
-                                   'start2', 'end2', 'color')),
-            file = vars$o, append = TRUE, quote = FALSE, sep = '\t', row.names = FALSE, col.names = FALSE)
+## # insertions track
+## cat('\ntrack name=', vars$n, '\n', sep = '', file = vars$o, append = TRUE)
+## write.table(subset(dat, select = c('chrChar', 'start', 'end', 'info', 'zero', 'strand',
+##                                    'start2', 'end2', 'color')),
+##             file = vars$o, append = TRUE, quote = FALSE, sep = '\t', row.names = FALSE, col.names = FALSE)

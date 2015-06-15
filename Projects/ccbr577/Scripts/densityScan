@@ -1,5 +1,5 @@
 #! /usr/bin/Rscript
-# densityScan.Rscript
+# densityScan
 # Scan HITseq results for density peaks
 # Randy Johnson
 # CCR Collaborative Bioinformatics Resource at Frederick National Laboratory
@@ -54,11 +54,11 @@ if(is.null(vars$Y))
 
 # peak must reach this threshold in order to be counted
 if(is.null(vars$peakThresh))
-    vars$peakThresh <- 1/3
+    vars$peakThresh <- 0.2
 
 # where we cutoff the edge of the peak
 if(is.null(vars$peakBoundary))
-    vars$peakBoundary <- 0.2
+    vars$peakBoundary <- 0.15
 
 
 ##### Data #####
@@ -156,9 +156,3 @@ cat('track name=', vars$n, '_peaks\n', sep = '', file = vars$o)
 write.table(subset(peaks, select = c('chrChar', 'start', 'end', 'name', 'score',
                                      'strand', 'thickStart', 'thickEnd')),
             file = vars$o, append = TRUE, quote = FALSE, sep = '\t', row.names = FALSE, col.names = FALSE)
-
-## # insertions track
-## cat('\ntrack name=', vars$n, '\n', sep = '', file = vars$o, append = TRUE)
-## write.table(subset(dat, select = c('chrChar', 'start', 'end', 'info', 'zero', 'strand',
-##                                    'start2', 'end2', 'color')),
-##             file = vars$o, append = TRUE, quote = FALSE, sep = '\t', row.names = FALSE, col.names = FALSE)

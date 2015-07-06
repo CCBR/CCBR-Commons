@@ -18,6 +18,14 @@ tmp <- strsplit(vars, '=')
 vars <- as.list(sapply(tmp, `[`, 2))
 names(vars) <- sapply(tmp, `[`, 1)
 
+### For testing ###
+if(FALSE)
+{
+    vars$i <- '../Data/Hughes_TAF3_WT_q20ct2.bed'
+    vars$build <- '../Builds/mm9G37_genes.bed'
+    vars$translate <- '../Builds/mm9G37_genes.txt'
+}
+
 
 ##### defaults #####
 
@@ -41,6 +49,18 @@ if(is.null(vars$n))
 # organism
 if(is.null(vars$org))
     vars$org <- 'mouse'
+
+# build
+if(is.null(vars$build))
+{
+    warning('Build not specified. Gene names will not be available.')
+}else{
+    if(!file.exists(vars$build))
+    {
+        warning(paste("Build file,", vars$build, "not found. Gene names will not be available."))
+        vars$build <- NULL
+    }
+}
 
 # sex chromosomes
 Xchrom <- c(mouse = 20, human = 23)
@@ -85,6 +105,24 @@ maxPos$add <- cumsum(c(0,maxPos$end.max[-dim(maxPos)[1]]))
 
 dat$pos <- dat$start + maxPos$add[dat$chr]
 
+# read in gene information
+genes <- read.table(vars$build, na.strings = '-', stringsAsFactors = FALSE)
+names(genes)[1:4] <- c('chrChar', 'start', 'end', 'info')
+
+# assume anything that doesn't convert to numeric should be missing
+if(class(genes$start) == 'character')
+    genes$start <- as.numeric(genes$start)
+
+if(class(genes$end) == 'character')
+    genes$end <- as.numeric(genes$end)
+
+# split gene names out from Ensembl IDs
+genes$ensembl <- sapply(strsplit(genes$info, ',', fixed = TRUE), `[`, 2)
+genes$info <- sapply(strsplit(genes$info, ',', fixed = TRUE), `[`, 1)
+
+# translation table
+translate <- read.table(vars$translate, sep = '\t', stringsAsFactors = FALSE, header = TRUE,
+                        na.strings = "")
 
 ##### Density #####
 
@@ -104,6 +142,7 @@ dens$thickEnd <- c(with(dens, peak[-length(peak)] & !peak[-1]), FALSE)
 peaks <- data.frame(midpoint = (dens$x[dens$thickStart] + dens$x[dens$thickEnd]) / 2,
                     start = NA,
                     end = NA,
+                    name = NA,
                     thickStart = NA,
                     thickEnd = NA)
 
@@ -144,9 +183,21 @@ peaks$end <- peaks$end - maxPos$add[peaks$chr]
 peaks$thickEnd <- peaks$thickEnd - maxPos$add[peaks$chr]
 
 # add other info
-peaks$name <- paste('peak', 1:dim(peaks)[1], sep = '')
+for(i in 1:dim(peaks)[1])
+{
+    # get gene name (if there is one)
+    peaks$ensembl[i] <- paste(unique(subset(genes, chrChar == peaks$chrChar[i] &
+                                                   ((start >= peaks$start[i] & start <= peaks$end[i]) |
+                                                    (end >= peaks$start[i] & end <= peaks$end[i]) |
+                                                    (peaks$start[i] >= start & peaks$start[i] <= end)))$ensembl),
+                              collapse = ',')
+    if(peaks$ensembl[i] != '')
+        peaks$name[i] <- unique(subset(genes, ensembl %in% strsplit(peaks$ensembl[i], ',')[[1]])$info)
+}
+peaks$name <- ifelse(peaks$name == '', '-', peaks$name)
+
 peaks$score <- 0
-peaks$strand <- '+' ##################################### We should fix this -- just calling them all + now
+peaks$strand <- '+' ################################### We should fix this -- just calling them all + now
 
 
 ##### Export bed File #####

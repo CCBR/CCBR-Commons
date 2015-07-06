@@ -26,6 +26,7 @@ write.table(unique(subset(tmp, select = c(Chromosome.Name, Gene.Start..bp., Gene
 
 ######### Add Ensembl ID / GO ID Translation table #########
 
+cat("Ensembl\tGO\tMGI\n", file = '../Builds/mm9G37_genes.txt')
 write.table(unique(subset(tmp, select = c(Ensembl.Gene.ID, GO.Term.Accession, MGI.symbol))),
             file = '../Builds/mm9G37_genes.txt', sep = '\t',
-            row.names = FALSE, col.names = FALSE, quote = FALSE)
+            row.names = FALSE, col.names = FALSE, quote = FALSE, append = TRUE)

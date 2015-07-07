@@ -35,9 +35,13 @@ if(is.null(vars$i))
 if(!file.exists(vars$i))
     stop(paste("Input file,", vars$i, "not found."))
 
-# output file
+# output bed file
 if(is.null(vars$o))
     vars$o <- gsub('Data', 'Results', gsub('.bed', '_peaks.bed', vars$i))
+
+# output RData file
+if(is.null(vars$R))
+    vars$R <- gsub('.bed', '.RData', gsub('Data', 'Results', vars$i))
 
 # track name
 if(is.null(vars$n))
@@ -204,3 +208,65 @@ cat('track name=', vars$n, '_peaks\n', sep = '', file = vars$o)
 write.table(subset(peaks, select = c('chrChar', 'start', 'end', 'name', 'score',
                                      'strand', 'thickStart', 'thickEnd')),
             file = vars$o, append = TRUE, quote = FALSE, sep = '\t', row.names = FALSE, col.names = FALSE)
+
+
+##### Set up GSEA #####
+
+# density vector
+tmp <- na.omit(unique(unlist(strsplit(peaks$name, ','))))
+tmp <- tmp[tmp != 'NA']
+Z <- matrix(NA, nrow = length(tmp), ncol = 1, dimnames = list(tmp, 'dens'))
+
+# gene set matrix
+tmp <- na.omit(unique(subset(translate, MGI %in% rownames(Z))$GO))
+tmp <- tmp[tmp != 'NA']
+A <- matrix(0, nrow = length(tmp), ncol = dim(Z)[1], dimnames = list(tmp, dimnames(Z)[[1]]))
+
+for(g in rownames(Z))
+{
+    # get all IDs
+    tmp <- subset(translate, MGI == g)
+    ensmu <- unique(tmp$Ensembl)
+    go <- unique(tmp$GO)
+
+    # find chromosomal coordinates of g
+    genes.sub <- subset(genes, info %in% ensmu)
+
+    # find all insertions in g
+    dat$keep <- 0
+
+    for(j in dim(genes.sub)[1])
+    {
+        dat$keep <- dat$keep + with(dat, chrChar == genes.sub[j,]$chrChar &
+                                         start >= genes.sub[j,]$start &
+                                         end <= genes.sub[j,]$end)
+    }
+
+    # find length of region covered by g (kb)
+    # be careful if we have any overlapping regions
+    overlap <- sapply(genes.sub$start, function(x) x > genes.sub$start & x < genes.sub$end)
+
+    while(any(overlap))
+    {
+        # will will drop this row, but first merge it with the first region that it overlaps with
+        fix <- (1:dim(genes.sub)[1])[apply(overlap, 2, any)][1]
+        mergewith <- which(overlap[,fix])[1]
+
+        genes.sub$end[mergewith] <- with(genes.sub, max(end[mergewith], end[fix]))
+        genes.sub <- genes.sub[-fix,]
+
+        # check if we have any more overlaps
+        overlap <- sapply(genes.sub$start, function(x) x > genes.sub$start & x < genes.sub$end)
+    }
+
+    l <- with(genes.sub, sum(end - start)) / 1000
+
+    # insertion density / kb
+    Z[g,1] <- sum(dat$keep > 0) / l
+
+    # identify gene sets
+    A[go[!is.na(go)],g] <- 1
+}
+
+
+save(A, Z, file = vars$R)

@@ -109,16 +109,12 @@ dat$pos <- dat$start + maxPos$add[dat$chr]
 genes <- read.table(vars$build, na.strings = '-', stringsAsFactors = FALSE)
 names(genes)[1:4] <- c('chrChar', 'start', 'end', 'info')
 
-# assume anything that doesn't convert to numeric should be missing
+# if these are characters -- assume anything that doesn't convert to numeric should be missing
 if(class(genes$start) == 'character')
     genes$start <- as.numeric(genes$start)
 
 if(class(genes$end) == 'character')
     genes$end <- as.numeric(genes$end)
-
-# split gene names out from Ensembl IDs
-genes$ensembl <- sapply(strsplit(genes$info, ',', fixed = TRUE), `[`, 2)
-genes$info <- sapply(strsplit(genes$info, ',', fixed = TRUE), `[`, 1)
 
 # translation table
 translate <- read.table(vars$translate, sep = '\t', stringsAsFactors = FALSE, header = TRUE,
@@ -189,10 +185,11 @@ for(i in 1:dim(peaks)[1])
     peaks$ensembl[i] <- paste(unique(subset(genes, chrChar == peaks$chrChar[i] &
                                                    ((start >= peaks$start[i] & start <= peaks$end[i]) |
                                                     (end >= peaks$start[i] & end <= peaks$end[i]) |
-                                                    (peaks$start[i] >= start & peaks$start[i] <= end)))$ensembl),
+                                                    (peaks$start[i] >= start & peaks$start[i] <= end)))$info),
                               collapse = ',')
-    if(peaks$ensembl[i] != '')
-        peaks$name[i] <- unique(subset(genes, ensembl %in% strsplit(peaks$ensembl[i], ',')[[1]])$info)
+    if(peaks$ensembl[i] != '' & !is.na(peaks$ensembl[i]))
+        peaks$name[i] <- paste(unique(subset(translate, Ensembl %in% strsplit(peaks$ensembl[i], ',')[[1]])$MGI),
+                               collapse = ',')
 }
 peaks$name <- ifelse(peaks$name == '', '-', peaks$name)
 

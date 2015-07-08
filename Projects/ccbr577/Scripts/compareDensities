@@ -96,16 +96,3 @@ for(i in 1:vars$nperm)
 
     perms[,i] <- A %*% tmp1 / apply(A, 1, sum) - A %*% tmp2 / apply(A, 1, sum)
 }
-
-
-perms <- perms[,order(apply(perms, 2, sd))]
-par(mar = c(0,0,0,0))
-plot(NA, NA, xlim = c(-5.5,6.15), ylim = c(1,1000))
-for(i in 1:1000)
-    points(perms[,i], rep(i, dim(perms)[1]), pch = '.')
-
-perms <- perms[order(apply(perms, 1, sd)),]
-par(mar = c(0,0,0,0))
-plot(NA, NA, xlim = c(-5.5,6.15), ylim = c(1,dim(perms)[1]))
-for(i in 1:dim(perms)[1])
-    points(perms[i,], rep(i, dim(perms)[2]), pch = '.')

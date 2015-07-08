@@ -1,0 +1,98 @@
+#! /usr/bin/Rscript
+# compareDensities
+# Scan HITseq results for density peaks
+# Randy Johnson
+# CCR Collaborative Bioinformatics Resource at Frederick National Laboratory
+# Leidos Biomedical Research, Inc
+
+
+# parse arguments
+vars <- commandArgs(TRUE)
+
+tmp <- strsplit(vars, '=')
+
+vars <- as.list(sapply(tmp, `[`, 2))
+names(vars) <- sapply(tmp, `[`, 1)
+
+### For testing ###
+if(FALSE)
+{
+    vars$i1 <- '../Results/Hughes_TAF3_WT_q20ct2.RData'
+    vars$i2 <- '../Results/Hughes_TAF3mutM880A_q20ct2.RData'
+}
+
+
+##### defaults #####
+
+# input file
+if(is.null(vars$i1) | is.null(vars$i2))
+    stop("Input files (i1 and i2) required")
+if(!file.exists(vars$i1))
+    stop(paste("Input file,", vars$i1, "not found."))
+if(!file.exists(vars$i2))
+    stop(paste("Input file,", vars$i2, "not found."))
+
+if(is.null(vars$nperm))
+    vars$nperm <- 1000
+
+if(is.null(vars$seed))
+    vars$seed <- 289473
+
+
+##### Read in data #####
+
+# i1
+load(vars$i1)
+A1 <- A
+Z1 <- Z
+
+# i2
+load(vars$i2)
+A2 <- A
+Z2 <- Z
+
+rm(A, Z)
+
+
+##### Merge A1 with A2 #####
+
+gos2add <- dimnames(A2)[[1]][which(!(dimnames(A2)[[1]] %in% dimnames(A1)[[1]]))]
+genes2add <- dimnames(A2)[[2]][which(!(dimnames(A2)[[2]] %in% dimnames(A1)[[2]]))]
+
+gosShared <- dimnames(A2)[[1]][which(dimnames(A2)[[1]] %in% dimnames(A1)[[1]])]
+genesShared <- dimnames(A2)[[2]][which(dimnames(A2)[[2]] %in% dimnames(A1)[[2]])]
+
+A <- A1
+A <- cbind(A, matrix(0, nrow = dim(A)[1], ncol = length(genes2add), dimnames = list(dimnames(A)[[1]], genes2add)))
+A <- rbind(A, matrix(0, nrow = length(gos2add), ncol = dim(A)[2], dimnames = list(gos2add, dimnames(A)[[2]])))
+A[gos2add, genes2add] <- A2[gos2add, genes2add]
+
+
+##### Update Z #####
+
+tmp <- matrix(0, nrow = dim(A)[2], ncol = 1, dimnames = list(dimnames(A)[[2]], 'dens'))
+tmp[dimnames(Z1)[[1]],] <- Z1
+Z1 <- tmp
+
+tmp <- matrix(0, nrow = dim(A)[2], ncol = 1, dimnames = list(dimnames(A)[[2]], 'dens'))
+tmp[dimnames(Z2)[[1]],] <- Z2
+Z2 <- tmp
+
+
+##### Analysis #####
+
+# average density over each gene set
+X1 <- A %*% Z1 / apply(A, 1, sum)
+X2 <- A %*% Z2 / apply(A, 1, sum)
+
+# permuations
+perms <- matrix(NA, nrow = dim(X1)[1], ncol = vars$nperm, dimnames = list(dimnames(X1)[[1]], 1:vars$nperm))
+
+set.seed(vars$seed)
+for(i in 1:vars$nperm)
+{
+    tmp1 <- sample(Z1)
+    tmp2 <- sample(Z2)
+
+    perms[,i] <- A %*% tmp1 / apply(A, 1, sum) - A %*% tmp2 / apply(A, 1, sum)
+}

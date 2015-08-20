@@ -1,0 +1,254 @@
+ ## Sample Affy Analysis Code
+
+
+## Human Transcript arrays - 6 samples
+## Treated vs Control
+
+source("http://bioconductor.org/biocLite.R")
+biocLite("pd.hg.u133.plus.2")
+install.packages("R2HTML")
+
+attr(affyData,"annotation") # find annotation file to install
+library(affy)
+library(oligo)
+library(genefilter)
+library(limma)
+library("arrayQualityMetrics")
+library(stringr)
+library(R2HTML)
+library(pd.hg.u133.plus.2)
+
+# To save at any point:
+save(list = ls(all = TRUE), file = ".RData")
+
+# Then load anytime:
+setwd("/Volumes/CCBR/projects/ccbr607/CEL/")
+load(".RData")
+
+setwd("/Users//maggiec//Documents//Thiele")
+
+##############Do Once######################################
+
+celFiles=read.table("covdesc",header=TRUE)[,1]
+
+# File Name Sample Drug Mouse
+# ASO50mg_514 ASO50mg_514 ASO50mg 514
+# ASO50mg_543 ASO50mg_543 ASO50mg 543
+# ASO50mg_547 ASO50mg_547 ASO50mg 547
+# AZD9150_50mg_477 AZD9150_50mg_477 AZD9150 477
+# AZD9150_50mg_479 AZD9150_50mg_479 AZD9150 479
+# AZD9150_50mg_481 AZD9150_50mg_481 AZD9150 481
+
+############################################################
+
+# Use oligo package to read in cel files for Gene arrays
+
+#celFiles <- list.celfiles()
+
+pd<-read.AnnotatedDataFrame("covdesc",header=TRUE,sep="\t")
+#x <- varMetadata(pd)
+#x <- data.frame(x, channel = "_ALL_")
+#varMetadata(pd) <- x
+
+affyData = read.celfiles(as.character(celFiles))
+phenoData(affyData) = pd
+
+colnames(affyData)
+colnames(affyData) = str_match(celFiles,"(.*).CEL")[,2]
+
+#Run QC plot for raw data:
+pData(affyData)
+arrayQualityMetrics(affyData,outdir = "QC_raw",
+intgroup = c("Sample"), force=TRUE)
+
+arrayQualityMetrics(affyData,outdir = "QC_raw",
+intgroup = as.character(colnames(pData(affyData))), force=TRUE)
+
+#Get expression set and run some QC
+eset = rma(affyData)
+
+#Plots for raw data
+
+pdfPath="rawhist.pdf"
+pdf(pdfPath)
+col1=as.integer(as.factor(colnames(affyData)))
+hist(affyData, transfo=log2,col=col1,main="Raw Data")
+#coord = list(x=13,y=0.4)
+legend("topright", colnames(affyData), fill=col1)
+dev.off()
+
+pdfPath="rawbox.pdf"
+pdf(pdfPath)
+boxplot(affyData,col=col1, main="Raw Data",las=2,cex.axis=0.8)
+dev.off()
+
+#Plots for Normalized Data
+pdfPath="normbox.pdf"
+pdf(pdfPath)
+boxplot(eset, col=col1, main="Normalized Data",las=2,cex.axis=0.5)
+dev.off()
+
+pdfPath="normhist.pdf"
+pdf(pdfPath)
+hist(eset,col=col1, main="After RMA")
+#coord = list(x=13,y=0.25)
+legend("topright", colnames(eset), fill=col1)
+dev.off()
+
+arrayQualityMetrics(eset,outdir = "QC_norm" ,
+intgroup = as.character(colnames(pData(affyData))), force=TRUE)
+
+e <- exprs(eset)
+
+##########
+#PCA Analysis
+library(reshape2)
+library(ggplot2)
+install.packages("devtools")
+library(devtools)
+install_github("ggbiplot","vqv")
+library(ggbiplot)
+
+###Run PCA##########
+
+edf=as.matrix(e)
+tedf= t(edf)
+pca=prcomp(tedf,scale.=T)
+tedf1 = data.frame(tedf)
+pData(eset)
+tedf1$group = as.factor(pData(eset)$Sample)
+
+plot(pca,type="lines") #Decide how many PC's are relevant for plotting
+pca$x[,1:3] #look at first 3 PC's
+
+#install.packages("rgl")
+#plot3d(pca$x[,1:3],col=as.integer(tedf1$group))
+library(rgl)
+open3d()
+plot3d(pca$x[,1:3],col = as.integer(tedf1$group),type="s",size=2)
+group.v<-as.vector(rownames(pData(eset)))
+group.split=strsplit(group.v,split="_")
+group.v=sapply(group.split,function(x) x[1])
+text3d(pca$x, pca$y, pca$z, group.v, cex=1.0, adj = 1.5)
+rgl.postscript("pca3d_indiv.pdf","pdf")
+
+library(ggbiplot)
+
+##Plot in 2D
+# ellipse only with n>=3
+tedf1$group = pData(eset)$Sample
+#tedf1$group = pData(efilt)$Passage
+tedf.class = as.character(group.v)
+ggbiplot(pca,obs.scale=1,var.scale=1,groups=tedf.class,
+ellipse=TRUE,circle=TRUE,var.axes=FALSE)
+#If n < 3:
+#ggbiplot(pca,obs.scale=1,var.scale=1,groups=tedf.class,var.axes=FALSE)
+
+
+#### Factorial Design - use this one ##################################
+
+Group <- factor(eset$Drug, levels = as.character(c("ASO50mg","AZD9150")))
+
+
+#> table(Group)
+#Group
+#Control SMCY_KD
+#3 3
+
+filter <- apply(exprs(eset), 1, function(x) length(x[x>5])>=2)
+length(filter[filter==TRUE])
+efilt <- e[filter,]
+
+design <- model.matrix(~0 + Group)
+colnames(design) <- as.character(c("ASO50mg","AZD9150"))
+cont.matrix <- makeContrasts(AZD9150-ASO50mg,
+levels=design)
+
+fit <- lmFit(efilt, design)
+fit2 <- contrasts.fit(fit, cont.matrix)
+fit2 <- eBayes(fit2)
+
+FC = 2^fit2$coefficients
+FC = ifelse(FC<1,-1/FC,FC)
+colnames(FC)=paste(colnames(FC),"FC",sep="_")
+pval = fit2$p.value
+colnames(pval) = paste(colnames(pval),"pval",sep="_")
+
+i=1
+adj.pval=vector()
+adj.pval=cbind(adj.pval,p.adjust(pval[,i], method="BH"))
+
+colnames(adj.pval)=paste(colnames(pval[,i]),"BH",sep="_")
+finalres=cbind(FC,pval,adj.pval)
+
+####Volcano Plot################
+#draw volcano plot using moderated t-statistics
+
+png("Volcano_plot.png", width=1000, height = 700)
+lod = fit2[["p.value"]][,1]
+lod = -log10(lod)
+mtstat = fit2[["t"]][,1]
+m = fit2[["coefficients"]][,1]
+o1 = order(abs(m),decreasing=TRUE)[1:100]
+o2 = order(abs(mtstat),decreasing=TRUE)[1:100]
+o=union(o1,o2)
+smoothScatter(m,lod,main="Moderated t", xlab="Log-ratio",ylab="LOD")
+points(m[o1],lod[o1],pch=18,col="blue") # most significant fold change (abs)
+points(m[o2],lod[o2],pch=1,col="red") # most significant p-val
+abline(h=2,v=c(-1,1))
+dev.off()
+
+##### MA Plot ############
+
+png("MA_plot.png", width=500, height = 300)
+smoothScatter(fit2$Amean,m,main="MA Plot", ylab="M",xlab="A")
+o1 = order(m,decreasing=TRUE)[1:500]
+points(fit2$Amean[o1],m[o1],pch=18,col="red")
+o2 = order(m,decreasing=FALSE)[1:500]
+points(fit2$Amean[o2],m[o2],pch=18,col="green")
+abline(h=0)
+dev.off()
+
+
+##############################For GO######################
+# Write files for GO analysis:
+finalres$FC = 2^finalres$logFC
+finalres$FC<-ifelse(finalres$FC<1,-1/finalres$FC,finalres$FC)
+FCresults = cbind(finalres$ID,finalres$FC,finalres$P.Value)
+colnames(FCresults)=c("ID","FC","pval")
+
+write.table(FCresults,file="GO_results.txt",quote=FALSE,row.names=FALSE,sep="\t")
+
+######################################################
+
+# Write out chip file for GO analysis
+attr(affyData,"annotation")
+"pd.hugene.2.0.st"
+
+source("http://bioconductor.org/biocLite.R")
+biocLite("pd.hugene.2.0.st")
+library(pd.hg.u133.plus.2)
+library(hgu133plus2.db)
+library(AnnotationDbi)
+#library("org.Hs.eg.db")
+
+ls("package:hgu133plus2.db") #probe level
+key=keys(hgu133plus2.db) #probe level
+key=keys(hgu133plus2.db)
+annot = AnnotationDbi::select(hgu133plus2.db, keys=key, columns=c("SYMBOL",
+"REFSEQ","GENENAME"),keytype="PROBEID")
+annot=annot[!duplicated(annot$PROBEID), ]
+
+write.table(annot,"hugene20st.chip",append=FALSE,quote=FALSE,row.names=FALSE,sep="\t")
+
+##Use this instead:
+
+expfilt=as.data.frame(efilt)
+expfilt$ProbeID=rownames(expfilt)
+finalres=as.data.frame(finalres)
+finalres$ID = rownames(finalres)
+colnames(annot) = c("ID","SYMBOL","REFSEQ","GENE")
+
+finalres2 = merge(finalres,annot,by.x="ID",by.y="ID")
+finalres3 = merge(expfilt,finalres2,by.x="ProbeID",by.y="ID")
+write.table(finalres3,file="All_results.txt",row.names=FALSE,sep="\t",quote=FALSE) 

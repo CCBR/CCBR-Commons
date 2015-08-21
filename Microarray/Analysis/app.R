@@ -33,7 +33,12 @@ mainPanel(
               tabPanel("ArrayQualityMetricsReport", plotOutput("plot")), 
               tabPanel("Plots", verbatimTextOutput("summary")), 
               tabPanel("Tables", tableOutput("table")),
-              tabPanel("Inputs", textOutput("projectid"), textOutput("Species"), textOutput("NoSamples"), textOutput("NoGroups"), textOutput("NoContrasts"))
+              tabPanel("Inputs", 
+                       textOutput("projectid"), 
+                       textOutput("Species"), 
+                       textOutput("NoSamples"), 
+                       textOutput("NoGroups"), 
+                       textOutput("NoContrasts"))
   )
 )
 ),
@@ -46,7 +51,7 @@ server <- function(input, output) {
   output$CELfiles=renderText(input$CELfiles)
   output$NoSamples=renderText({paste("No. of samples: ",input$NoSamples)})
   output$NoContrasts=renderText({paste("No. of contrasts: ",input$NoContrasts)})
-  output$NoGroups=renderText(input$NoGroups)
+  output$NoGroups=renderText({paste("No. of groups: ",input$NoGroups)})
 }
 
 

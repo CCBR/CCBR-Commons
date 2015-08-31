@@ -4,10 +4,8 @@
 # CCR Collaborative Bioinformatics Resource
 # Advanced Biomedical Computing Center at Frederick National Laboratory
 # Leidos Biomedical Research, Inc
-# Created January 30, 2015
-# Last Modified February 12, 2015
 
-library(gdata)
+library(XLConnect)
 library(lpSolve)
 library(WriteXLS)
 
@@ -16,10 +14,18 @@ library(WriteXLS)
 #############
 
 ##### HLA data from Carrington lab #####
-dat <- read.xls('../data/Cameroon_KS_HLA.xlsx', stringsAsFactors = FALSE, na.strings = c(''))
+dat <- readWorksheet(loadWorkbook('../Data/Cameroon_KS_HLA.xlsx'), sheet = 'Sheet1')
+dat2 <- rbind(readWorksheet(loadWorkbook('../Data/HLAtypingResults_plate5_150824.xlsx'), sheet = 'Sheet1'),
+              readWorksheet(loadWorkbook('../Data/HLAtypingResults_plate6_150824.xlsx'), sheet = 'Sheet1'))
+
+dat <- merge(dat, dat2, by.x = names(dat),
+             by.y = c('HGAL', 'PID', 'A_1', 'A_2', 'B_1', 'B_2', 'C_1', 'C_2', 'DQA1_1', 'DQA1_2', 'DQB1_1',
+                      'DQB1_2', 'DRB1_1', 'DRB1_2', 'DRB3_1', 'DRB3_2', 'DRB4_1', 'DRB4_2', 'DRB5_1', 'DRB5_2',
+                      'DPB1_1', 'DPB1_2'), all = TRUE)
+
 dat$PID <- gsub('_VOS', '', dat$PID)
 
-clin <- read.csv('../data/ksbase.csv', stringsAsFactors = FALSE,
+clin <- read.csv('../Data/ksbase.csv', stringsAsFactors = FALSE,
                  na.strings = c('Legitimate Skip', '-1', '88', '99'))
 clin$case <- with(clin, substr(ID, 1, 1) == 'K')
 
@@ -28,15 +34,20 @@ dat <- merge(dat, subset(clin, select = c('ID', 'case')), by.x = 'PID', by.y = '
 names(dat) <- gsub('Export.', '', names(dat), fixed = TRUE)
 rownames(dat) <- dat$PID
 
+##### Already have matches for these #####
+matched <- readLines('hla_matched.txt')
+matched <- unlist(strsplit(matched, ':', fixed = TRUE))
+
+dat <- subset(dat, !PID %in% matched)
 
 ##### Load HLA data from my R package #####
-load('~/Documents/Work/HLA/HLA/data/hlaA_broad.RData')
-load('~/Documents/Work/HLA/HLA/data/hlaB_broad.RData')
-load('~/Documents/Work/HLA/HLA/data/hlaBw.RData')
-load('~/Documents/Work/HLA/HLA/data/hlaC_broad.RData')
-load('~/Documents/Work/HLA/HLA/data/hlaCgrp.RData')
-load('~/Documents/Work/HLA/HLA/data/hlaDQA_broad.RData')
-load('~/Documents/Work/HLA/HLA/data/hlaDRB1_broad.RData')
+load('~/Documents/Work/R-packages/HLA/HLA/data/hlaA_broad.RData')
+load('~/Documents/Work/R-packages/HLA/HLA/data/hlaB_broad.RData')
+load('~/Documents/Work/R-packages/HLA/HLA/data/hlaBw.RData')
+load('~/Documents/Work/R-packages/HLA/HLA/data/hlaC_broad.RData')
+load('~/Documents/Work/R-packages/HLA/HLA/data/hlaCgrp.RData')
+load('~/Documents/Work/R-packages/HLA/HLA/data/hlaDQA_broad.RData')
+load('~/Documents/Work/R-packages/HLA/HLA/data/hlaDRB1_broad.RData')
 
 
 ##### Figure out genotypes at different levels of accuracy #####
@@ -283,5 +294,5 @@ actual <- with(matches, objective[solution == 1])
 actual.df <- make.one.sheet(names(actual))
 picked.df <- make.one.sheet(names(actual[order(-actual)][1:16]))
 
-write.table(names(actual)[1:16], 'hla_matched.txt', row.names = FALSE, col.names = FALSE,
-            quote = FALSE)
+write.table(names(actual), 'hla_matched.txt', row.names = FALSE, col.names = FALSE,
+            quote = FALSE, append = TRUE)

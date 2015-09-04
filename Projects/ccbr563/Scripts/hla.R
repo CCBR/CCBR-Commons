@@ -38,6 +38,12 @@ rownames(dat) <- dat$PID
 matched <- readLines('hla_matched.txt')
 matched <- unlist(strsplit(matched, ':', fixed = TRUE))
 
+# drop a couple with low DNA levels
+matched <- c(matched, 'T0590', 'T0849', 'T1120', 'T1175')
+
+## # keep any that need to be redone
+## matched <- matched[!matched %in% c('K0026', 'K0170', 'K0891', 'K1065')]
+
 dat <- subset(dat, !PID %in% matched)
 
 ##### Load HLA data from my R package #####

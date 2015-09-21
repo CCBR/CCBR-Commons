@@ -22,6 +22,8 @@ if(FALSE)
 {
     vars$i1 <- '../Results/Hughes_TAF3_WT_q20ct2.RData'
     vars$i2 <- '../Results/Hughes_TAF3mutM880A_q20ct2.RData'
+    vars$bed1 <- '../Results/Hughes_TAF3_WT_q20ct2_peaks.bed'
+    vars$bed2 <- '../Results/Hughes_TAF3mutM880A_q20ct2_peaks.bed'
     vars$o <- '../Results/taf3_results.txt'
 }
 
@@ -63,6 +65,17 @@ Z2 <- Z
 
 rm(A, Z)
 
+# bed1
+bed1 <- read.table(vars$bed1, skip = 1, header = FALSE, stringsAsFactor = FALSE)
+names(bed1) <- c('chr', 'start', 'end', 'genes', 'V5', 'strand', 'thickStart', 'thickEnd')
+
+bed1$len <- with(bed1, end - start)
+
+# bed2
+bed2 <- read.table(vars$bed2, skip = 1, header = FALSE, stringsAsFactor = FALSE)
+names(bed2) <- c('chr', 'start', 'end', 'genes', 'V5', 'strand', 'thickStart', 'thickEnd')
+
+bed2$len <- with(bed2, end - start)
 
 ##### Merge A1 with A2 #####
 
@@ -76,6 +89,11 @@ A <- A1
 A <- cbind(A, matrix(0, nrow = dim(A)[1], ncol = length(genes2add), dimnames = list(dimnames(A)[[1]], genes2add)))
 A <- rbind(A, matrix(0, nrow = length(gos2add), ncol = dim(A)[2], dimnames = list(gos2add, dimnames(A)[[2]])))
 A[gos2add, genes2add] <- A2[gos2add, genes2add]
+
+
+##### Merge bed1 with bed2 #####
+
+## peaks <- merge(bed1, bed2, by.x = 'genes', by.y = 'genes', all = TRUE)
 
 
 ##### Update Z #####

@@ -25,6 +25,7 @@ if(FALSE)
     vars$bed1 <- '../Results/Hughes_TAF3_WT_q20ct2_peaks.bed'
     vars$bed2 <- '../Results/Hughes_TAF3mutM880A_q20ct2_peaks.bed'
     vars$o <- '../Results/taf3_results.txt'
+    vars$savePerms <- TRUE
 }
 
 
@@ -49,6 +50,10 @@ if(is.null(vars$nperm))
 # seed for permutations
 if(is.null(vars$seed))
     vars$seed <- 289473
+
+# shall we save permutations?
+if(is.null(vars$savePerms))
+    vars$savePerms <- FALSE
 
 
 ##### Read in data #####
@@ -126,6 +131,9 @@ for(i in 1:vars$nperm)
 
 # order results for each GO -- keep same formatting
 perms <- t(apply(perms, 1, function(x) x[order(x)]))
+
+if(vars$savePerms)
+    save(perms, file = 'perms.RData')
 
 # find percentiles for observed differences
 p <- X[,1]

@@ -8,7 +8,10 @@
 
 library(doBy)
 library(MASS)
-
+library(magrittr)
+library(VariantAnnotation)
+library(TxDb.Mmusculus.UCSC.mm9.knownGene) # database for VariantAnnotation
+library(mygene) # for conversion of gene IDs to gene symbols
 
 # parse arguments
 vars <- commandArgs(TRUE)
@@ -84,10 +87,14 @@ if(is.null(vars$peakThresh))
 if(is.null(vars$peakBoundary))
     vars$peakBoundary <- 0.15
 
+# window size for kernel density smoother
+if(is.null(vars$bw))
+    vars$bw <- 200
+
 
 ##### Data #####
 
-# read in
+# read in bed file
 dat <- read.table(vars$i, sep = '\t', skip = 1, comment.char = '', stringsAsFactors = FALSE)
 names(dat) <- c('chrChar', 'start', 'end', 'info', 'zero', 'strand', 'start2', 'end2', 'color')
 
@@ -123,150 +130,110 @@ if(class(genes$end) == 'character')
 # translation table
 translate <- read.table(vars$translate, sep = '\t', stringsAsFactors = FALSE, header = TRUE,
                         na.strings = "")
+translate$geneID <- gsub('ENSMUSG', '', translate$Ensembl) %>%
+                    as.numeric()
 
 ##### Density #####
 
 # calculate density - make sure we have a sample point at least as often as bw is wide
-dens <- density(dat$pos, bw = 1e3, n = 2^ceiling(log(max(dat$pos) / 1e3, 2)))
+dens <- density(dat$pos, bw = vars$bw, n = 2^ceiling(log(max(dat$pos) / vars$bw, 2)))
 
 # points within peaks
-dens$peak <- with(dens, (y / max(y)) > vars$peakThresh)
+dens$peak <- with(dens, y > 1e-10)
 
 # peak start
-dens$thickStart <- c(FALSE, with(dens, peak[-1] & !peak[-length(peak)]))
+dens$thickStart <- with(dens, c(peak[1], peak[-1] & !peak[-length(peak)]))
 
 # peak end
-dens$thickEnd <- c(with(dens, peak[-length(peak)] & !peak[-1]), FALSE)
+dens$thickEnd <- with(dens, c(peak[-length(peak)] & !peak[-1], peak[length(peak)]))
 
-# grab peaks
-peaks <- data.frame(midpoint = (dens$x[dens$thickStart] + dens$x[dens$thickEnd]) / 2,
+# grab clusters
+clusters <- data.frame(midpoint = (dens$x[dens$thickStart] + dens$x[dens$thickEnd]) / 2,
                     start = NA,
                     end = NA,
                     name = NA,
                     thickStart = NA,
-                    thickEnd = NA)
+                    thickEnd = NA,
+                    nInsertions = NA,
+                    chr = NA,
+                    chrChar = NA)
 
-for(i in 1:dim(peaks)[1])
+for(i in 1:dim(clusters)[1])
 {
-    # find boundaries of peak
+    # find boundaries of cluster
     thickStart <- which(dens$thickStart)[i]
-    start <- thickStart
+    thinStart <- thickStart
 
     thickEnd <- which(dens$thickEnd)[i]
-    end <- thickEnd
+    thinEnd <- thickEnd
 
-    maxy <- max(dens$y)
+    # add chromosome number
+    clusters$chr[i] <- sum(clusters$midpoint[i] > maxPos$add)
+    clusters$chrChar[i] <- ifelse(clusters$chr[i] == vars$X, 'chrX',
+                           ifelse(clusters$chr[i] == vars$Y, 'chrY',
+                                                              paste('chr', clusters$chr[i], sep = '')))
 
-    # expand a little
-    while(dens$y[start] / maxy > vars$peakBoundary)
-        start <- start - 1
+    # check where the insertions are actually found
+    tmp <- subset(dat, chrChar == clusters$chrChar[i] &
+                       start >= dens$x[thinStart] - maxPos$add[clusters$chr[i]] &
+                       start <= dens$x[thinEnd]  - maxPos$add[clusters$chr[i]])
 
-    while(dens$y[end] / maxy > vars$peakBoundary)
-        end <- end + 1
+    # how many insertions do we have in this cluster?
+    if(dim(tmp)[1] == 0)
+        stop("There are no insertions in this cluster...something is wrong.")
 
-    peaks$start[i] <- round(dens$x[start])
-    peaks$thickStart[i] <- round(dens$x[thickStart])
-    peaks$end[i] <- round(dens$x[end])
-    peaks$thickEnd[i] <- round(dens$x[thickEnd])
+    clusters$nInsertions[i] <- dim(tmp)[1]
+
+    # calculate cluster boundaries (in corrected bp position)
+    clusters$start[i] <- round(dens$x[thinStart]) - maxPos$add[clusters$chr[i]]
+    clusters$thickStart[i] <- min(tmp$start)
+    clusters$thickEnd[i] <- max(tmp$start) + 1
+    clusters$end[i] <- max(c(tmp$end, round(dens$x[thinEnd]) - maxPos$add[clusters$chr[i]]))
 }
 
-# add chromosome
-peaks$chr <- sapply(peaks$midpoint, function(m) sum(m > maxPos$add))
-peaks$chrChar <- ifelse(peaks$chr == vars$X, 'chrX',
-                 ifelse(peaks$chr == vars$Y, 'chrY',
-                                             paste('chr', peaks$chr, sep = '')))
+# get annotation information
+annotation <- IRanges(clusters$thickStart, clusters$thickEnd) %>%
+              GRanges(seqnames = clusters$chrChar) %>%
+              locateVariants(subject = TxDb.Mmusculus.UCSC.mm9.knownGene, region = AllVariants())
 
-# translate positions
-peaks$start <- peaks$start - maxPos$add[peaks$chr]
-peaks$thickStart <- peaks$thickStart - maxPos$add[peaks$chr]
-peaks$end <- peaks$end - maxPos$add[peaks$chr]
-peaks$thickEnd <- peaks$thickEnd - maxPos$add[peaks$chr]
+geneInfo <- queryMany(qterms = na.omit(unique(annotation$GENEID)), scopes = 'entrezgene', species = 'mouse')
+geneSymbols <- geneInfo$symbol
+names(geneSymbols) <- geneInfo$entrezgene
 
 # add other info
-for(i in 1:dim(peaks)[1])
+for(i in 1:dim(clusters)[1])
 {
-    # get gene name (if there is one)
-    peaks$ensembl[i] <- paste(unique(subset(genes, chrChar == peaks$chrChar[i] &
-                                                   ((start >= peaks$start[i] & start <= peaks$end[i]) |
-                                                    (end >= peaks$start[i] & end <= peaks$end[i]) |
-                                                    (peaks$start[i] >= start & peaks$start[i] <= end)))$info),
-                              collapse = ',')
-    if(peaks$ensembl[i] != '' & !is.na(peaks$ensembl[i]))
-        peaks$name[i] <- paste(unique(subset(translate, Ensembl %in% strsplit(peaks$ensembl[i], ',')[[1]])$MGI),
-                               collapse = ',')
-}
-peaks$name <- ifelse(peaks$name == '', '-', peaks$name)
+    entries <- as.vector(annotation@seqnames == clusters$chrChar[i] &
+                         annotation@ranges == IRanges(clusters$thickStart[i], clusters$thickEnd[i]))
 
-peaks$score <- 0
-peaks$strand <- '+' ################################### We should fix this -- just calling them all + now
+    clusters$location[i] <- annotation$LOCATION[entries] %>%
+                         unique() %>%
+                         paste(collapse = ', ')
+
+    tmp <- annotation$GENEID[entries] %>%
+           unique() %>%
+           na.omit()
+
+    if(length(tmp) > 0)
+    {
+        clusters$name[i] <- geneSymbols[tmp] %>%
+                         paste(collapse = ',')
+    }else{
+        clusters$name[i] <- ''
+    }
+}
+
+clusters$score <- log10(clusters$nInsertions / dim(dat)[1])
+clusters$strand <- '+' ################################### We should fix this -- just calling them all + now
 
 
 ##### Export bed File #####
 
-# peaks track
-cat('track name=', vars$n, '_peaks\n', sep = '', file = vars$o)
-write.table(subset(peaks, select = c('chrChar', 'start', 'end', 'name', 'score',
+# clusters track
+cat('track name=', vars$n, '_clusters\n', sep = '', file = vars$o)
+write.table(subset(clusters, select = c('chrChar', 'start', 'end', 'name', 'score',
                                      'strand', 'thickStart', 'thickEnd')),
             file = vars$o, append = TRUE, quote = FALSE, sep = '\t', row.names = FALSE, col.names = FALSE)
 
-
-##### Set up GSEA #####
-
-# density vector
-tmp <- na.omit(unique(unlist(strsplit(peaks$name, ','))))
-tmp <- tmp[tmp != 'NA']
-Z <- matrix(NA, nrow = length(tmp), ncol = 1, dimnames = list(tmp, 'dens'))
-
-# gene set matrix
-tmp <- na.omit(unique(subset(translate, MGI %in% rownames(Z))$GO))
-tmp <- tmp[tmp != 'NA']
-A <- matrix(0, nrow = length(tmp), ncol = dim(Z)[1], dimnames = list(tmp, dimnames(Z)[[1]]))
-
-for(g in rownames(Z))
-{
-    # get all IDs
-    tmp <- subset(translate, MGI == g)
-    ensmu <- unique(tmp$Ensembl)
-    go <- unique(tmp$GO)
-
-    # find chromosomal coordinates of g
-    genes.sub <- subset(genes, info %in% ensmu)
-
-    # find all insertions in g
-    dat$keep <- 0
-
-    for(j in dim(genes.sub)[1])
-    {
-        dat$keep <- dat$keep + with(dat, chrChar == genes.sub[j,]$chrChar &
-                                         start >= genes.sub[j,]$start &
-                                         end <= genes.sub[j,]$end)
-    }
-
-    # find length of region covered by g (kb)
-    # be careful if we have any overlapping regions
-    overlap <- sapply(genes.sub$start, function(x) x > genes.sub$start & x < genes.sub$end)
-
-    while(any(overlap))
-    {
-        # will will drop this row, but first merge it with the first region that it overlaps with
-        fix <- (1:dim(genes.sub)[1])[apply(overlap, 2, any)][1]
-        mergewith <- which(overlap[,fix])[1]
-
-        genes.sub$end[mergewith] <- with(genes.sub, max(end[mergewith], end[fix]))
-        genes.sub <- genes.sub[-fix,]
-
-        # check if we have any more overlaps
-        overlap <- sapply(genes.sub$start, function(x) x > genes.sub$start & x < genes.sub$end)
-    }
-
-    l <- with(genes.sub, sum(end - start)) / 1000
-
-    # insertion density / kb
-    Z[g,1] <- sum(dat$keep > 0) / l
-
-    # identify gene sets
-    A[go[!is.na(go)],g] <- 1
-}
-
-
-save(A, Z, file = vars$R)
+# and full information
+save(clusters, file = vars$R)

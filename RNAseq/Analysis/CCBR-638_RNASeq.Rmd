@@ -1,0 +1,258 @@
+
+---
+title: "Regulation of localized RNAs - fibroblast cells "
+output:
+  html_document:
+    pandoc_args: [
+      "+RTS", "-K128m",
+      "-RTS"
+    ]
+---
+## *CCBR-638*
+### *Maggie Cam*
+### *Nov 11, 2015*
+
+## **Background**
+We want to analyze two RNA-Seq datasets derived from total RNA of fractionated Protrusions (Ps) and cell body (CB) fractions of mouse fibroblast cells. We are interested in RNAs that are enriched in protrusions (i.e. have a high Ps/CB ratio) and want to identify subsets of these RNAs that are co-regulated by different factors.
+
+The first dataset aims at identifying RNAs whose enrichment at protrusions is (or is not) affected by knockdown of the APC tumor suppressor protein. We have sequenced 4 control (si-control) and 4 APC knockdown (si-APC) replicates. Each replicate consists of paired Ps and CB fractions (i.e. 16 samples total).
+
+The second dataset aims at identifying RNAs whose enrichment at protrusions is affected by expression of a competing UTR construct, which mislocalizes RNAs through sequestration of necessary factors. We have sequenced 4 control (HBB) and 4 experimental (Pkp4) replicates. Each replicate consists of paired Ps and CB fractions (i.e. 16 samples total).
+
+## **Data Processing**
+
+```{r setup, echo=FALSE, warning=FALSE}
+
+source("http://bioconductor.org/biocLite.R")
+#biocLite("edgeR")
+library(Rsubread)
+library(limma)
+library(edgeR)
+library(ggplot2)
+library(rgl)
+library(knitr)
+
+
+knit_hooks$set(rgl = function(before, options, envir) {
+  if (!before) {
+    ## after a chunk has been evaluated
+    if (rgl.cur() == 0) return()  # no active device
+    name = paste(options$fig.path, options$label, sep = '')
+    rgl.snapshot(paste(name, '.png', sep = ''), fmt = 'png')
+    return(paste('\\includegraphics{', name, '}\n', sep = ''))
+  }
+})
+
+knit_hooks$set(webgl = hook_webgl)
+```
+####*This part of the program was run on biowulf, and data transferred to a local directory*
+
+```{r, eval=FALSE}
+#Command line version
+module load subread
+x=$(ls *.bam)
+featureCounts -p -T 8 -s 2 -p -t exon -g gene_id -a /data/maggiec/RNASeq/Genomes/mm10/gencode.vM4.all.gtf -o counts_ss.txt $x
+
+#Used R version:
+gtf="/data/maggiec/RNASeq/Genomes/mm10/gencode.vM4.all.gtf"
+targets <- readTargets()
+
+fc <- featureCounts(files=targets$bam,isGTFAnnotationFile=TRUE,nthreads=32,
+      annot.ext=gtf,GTF.attrType="gene_name",strandSpecific=2,isPairedEnd=TRUE)
+x <- DGEList(counts=fc$counts, genes=fc$annotation)
+
+```
+####*Load data from local directory:*
+
+```{r,eval=TRUE, echo=FALSE}
+setwd("/Users/maggiec/GitHub/Maggie/ccbr638/")
+#load("data/ccbr638.RData")
+load("data/ccbr638_2.RData")
+
+ls()
+
+targets$Phenotype=paste(targets$Cell,targets$Compartment,sep="_")
+targets$bam=colnames(x)
+targets
+fc$stat
+
+fc1=mat=fc$counts
+tfc1=t(fc1)
+filter <- apply(fc1, 1, function(x) length(x[x>5])>=1)
+fc1filt <- fc1[filter,]
+genes <- rownames(fc1filt)
+
+```
+
+####*Mapping Rate:*
+
+```{r, fig.width=10, fig.height=5, warning=FALSE,echo=FALSE}
+#options(scipen=9)
+#map=as.numeric(targets$mapped)
+#names(map)=sapply(strsplit(targets$bam,split="\\."),function(x) x[1])
+#barplot(map, col=as.numeric(as.factor(targets$Phenotype)),las = 2,cex.axis = 0.7)
+```
+
+
+####*QC Check: Look at raw signal distribution and median expression levels*
+
+```{r fig.width=10, fig.height=5, echo=FALSE, warning=FALSE,message=FALSE}
+
+library(ggplot2)
+library(reshape)
+
+fc1filt=as.data.frame(fc1filt)
+fc1filtnames=paste(targets$Phenotype,targets$Replicate)
+#fc1filtnames=sapply(strsplit(colnames(fc1filt),split="\\."),function(x) x[2])
+colnames(fc1filt)=paste(targets$Phenotype,targets$Replicate)
+
+
+df.m <- melt(as.data.frame(fc1filt))
+ggplot(df.m) + 
+  geom_density(aes(x = value, colour = variable)) + labs(x = NULL) +
+  theme(legend.position='right') + scale_x_log10() + ggtitle("Raw Counts")
+
+par(mar=c(10,7,1,1))
+boxplot(log(value)~variable,las=2,data=df.m,main="Raw Signal", 
+  	ylab="Counts",col=as.numeric(as.factor(targets$Phenotype)))
+
+```
+
+####*Data is normalized by TMM: filtered number of genes*
+
+```{r,fig.width=10, fig.height=5, echo=FALSE, warning=FALSE, message=FALSE}
+
+x <- DGEList(counts=fc$counts, genes=fc$annotation)
+isexpr <- rowSums(cpm(x)>0.5) >= 2
+hasannot <- rowSums(is.na(x$genes))==0
+x <- x[isexpr & hasannot,keep.lib.sizes=FALSE]
+
+#Number of filtered genes 
+dim(x)
+
+x <- calcNormFactors(x)
+
+par(mfrow=c(2,4))
+for (i in 1:dim(x)[2]){
+plotMD(cpm(x, log=TRUE), column=i)
+abline(h=0, col="red", lty=2, lwd=2)
+}
+
+```
+
+####*Run Voom*
+```{r, echo=FALSE,warning=FALSE,message=FALSE}
+#Do analysis for entire group
+celltype <- factor(targets$Phenotype)
+design <- model.matrix(~0+celltype)
+dev.off()
+#v <- voom(x,design,plot=TRUE,normalize="quantile")
+v <- voom(x,design,plot=TRUE)
+```
+
+####*After Normalization*
+
+```{r, echo=FALSE,webgl=TRUE}
+
+colnames(v$E)=paste(fc1filtnames,targets$Replicate)
+df.m <- melt(as.data.frame(v$E))
+
+ggplot(df.m) + 
+  geom_density(aes(x = value, colour = variable)) + labs(x = NULL) +
+  theme(legend.position='right') + ggtitle("Normalized Counts")
+
+dev.off()
+par(mar=c(10,7,1,1))
+boxplot(value~variable,las=2,data=df.m,main="Normalized Signal", 
+  	ylab="Counts",col=as.numeric(as.factor(targets$Phenotype)))
+
+edf=as.matrix(v$E)
+tedf= t(edf)
+pca=prcomp(tedf,scale.=T)
+tedf1 = data.frame(tedf)
+Phenotype=targets$Phenotype
+cell_rep=paste(Phenotype,targets$Replicate,sep=".")
+tedf1$group = as.factor(Phenotype)
+
+plot(pca,type="lines")  #Decide how many PC's are relevant for plotting
+#pca$x[,1:3]  #look at first 3 PC's
+
+plot3d(pca$x[,1:3],col = as.integer(tedf1$group),type="s",size=2)
+group.v<-as.vector(cell_rep)
+text3d(pca$x, pca$y, pca$z, group.v, cex=1.0, adj = 1.2) 
+#rgl.postscript("pca3d_indiv.pdf","pdf")
+```
+####*Statistical Analysis of Experimental groups (lmFit)*
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+#Run analysis of Experimental group:
+
+options(digits=3) 
+design
+colnames(design)=levels(celltype)
+
+colnames(design)
+fit <- lmFit(v,design)   
+#cm <- makeContrasts(Con_PsvsCB=Con_Ps-Con_CB, APC_PsvsCB=APC_Ps-APC_CB,
+#                    Diff=(APC_Ps-APC_CB)-(Con_Ps-Con_CB), levels=design)
+cm <- makeContrasts(HBB_PsvsCB=HBB_Ps-HBB_CB, Pkp4_PsvsCB=Pkp4_Ps-Pkp4_CB,
+                    Diff=(Pkp4_Ps-Pkp4_CB)-(HBB_Ps-HBB_CB), levels=design)
+
+fit2 <- contrasts.fit(fit, cm)
+fit2 <- eBayes(fit2)
+topgenes=topTable(fit2, coef="Diff",n=50,sort.by="p")
+
+#volcanoplot(fit2,coef="HBB_PsvsCB")
+#volcanoplot(fit2,coef="Pkp4_PsvsCB")
+#volcanoplot(fit2,coef="Diff") 
+
+FC = 2^(fit2$coefficients)
+FC = ifelse(FC<1,-1/FC,FC)
+colnames(FC)=paste(colnames(fit2$coefficients),"FC",sep="_")
+pval=fit2$p.value
+colnames(pval)=paste(colnames(fit2$p.value),"pval",sep="_")
+res=cbind(FC,pval)
+DT::datatable(res)
+
+finalres=topTable(fit2,coef="Diff",sort="none",n=Inf)
+finalres=cbind(v$E,FC,pval)
+#head(finalres)
+
+write.table(finalres,file="RNASeq_results.txt",sep="\t")
+```
+
+####*Heatmap: Top genes*
+
+```{r, echo=FALSE, message=FALSE,warning=FALSE}
+library(d3heatmap)
+library(reshape2)
+
+#Original Heatmap (notice batch effect)
+topgenes_data=v$E[rownames(v$E) %in% rownames(topgenes),]
+colnames(topgenes_data)=colnames(v$E)
+topgenes_data=topgenes_data[match(rownames(topgenes),rownames(topgenes_data)),]
+#colnames(topgenes_data)=targets$Phenotype[match(colnames(topgenes_data),targets$bam)]
+#colnames(topgenes_data)=paste(colnames(topgenes_data),targets$Replicate,sep=".")
+cc=colsplit(string=colnames(topgenes_data), pattern="_", names=c("Part1", "Part2"))
+dd=colsplit(string=cc$Part2, pattern="\\.", names=c("Part1", "Part2"))
+colnames(topgenes_data)=dd$Part1
+d3heatmap(topgenes_data, scale = "row", dendrogram = "none", main = "title",
+    color = "YlOrRd",cexRow=1,main="topgenes")
+```
+
+```{r, echo=FALSE}
+
+datadir="/Users/maggiec/Github/Maggie/ccbr638/results"
+setwd(datadir)
+write.table(finalres,file="Pkp4_HBB_FCpval.txt",
+      row.names=TRUE,col.names=TRUE,sep="\t",quote=FALSE)
+
+```
+
+###*Provenance:*
+
+```{r, echo=FALSE}
+
+sessionInfo()
+
+```

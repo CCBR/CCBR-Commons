@@ -8,13 +8,15 @@
 library(XLConnect)
 library(lpSolve)
 library(WriteXLS)
+library(magrittr)
 
 #############
 # Data Prep #
 #############
 
 ##### HLA data from Carrington lab #####
-dat <- readWorksheet(loadWorkbook('../Data/Cameroon_KS_HLA.xlsx'), sheet = 'Sheet1')
+dat <- loadWorkbook('../Data/Cameroon_KS_HLA.xlsx') %>%
+       readWorksheet(sheet = 'Sheet1')
 dat2 <- rbind(readWorksheet(loadWorkbook('../Data/HLAtypingResults_plate5_150824.xlsx'), sheet = 'Sheet1'),
               readWorksheet(loadWorkbook('../Data/HLAtypingResults_plate6_150824.xlsx'), sheet = 'Sheet1'))
 
@@ -38,13 +40,16 @@ rownames(dat) <- dat$PID
 matched <- readLines('hla_matched.txt')
 matched <- unlist(strsplit(matched, ':', fixed = TRUE))
 
+dat$matched <- dat$PID %in% matched
+
 # drop a couple with low DNA levels
-matched <- c(matched, 'T0590', 'T0849', 'T1120', 'T1175')
+dat$drop <- dat$PID %in% c('T0590', 'T0849', 'T1120', 'T1175')
 
 ## # keep any that need to be redone
-## matched <- matched[!matched %in% c('K0026', 'K0170', 'K0891', 'K1065')]
+## dat$redo <- dat$PID %in% c('K0026', 'K0170', 'K0891', 'K1065')
+## dat$redo <- dat$case
 
-dat <- subset(dat, !PID %in% matched)
+dat <- subset(dat, redo | (!matched & !drop))
 
 ##### Load HLA data from my R package #####
 load('~/Documents/Work/R-packages/HLA/HLA/data/hlaA_broad.RData')

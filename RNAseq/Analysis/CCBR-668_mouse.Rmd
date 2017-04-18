@@ -1,0 +1,1391 @@
+---
+title: "Drug Resistance in tumor cells grown in different substrates"
+always_allow_html: yes
+output:
+  pdf_document: default
+  html_document:
+    pandoc_args:
+    - +RTS
+    - -K128m
+    - -RTS
+  word_document: default
+---
+## *CCBR-668*
+### *Maggie Cam*
+### *(In Collaboration with Scott Medina, Joel Schneider)*
+### *Jan 15, 2017*
+
+## **Background**
+In Vitro Drug Screening in mouse cells grown on different substrates,
+compared to fresh tissue isolate
+
+Goal: To find genes differentially expressed in cells grown on substrates of different hardness (glass, medium, low) compared to isolate
+
+## **Data Processing**
+
+```{r setup, comment=NA, echo=FALSE, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE,
+	comment = NA
+)
+
+options(allow_html_in_all_outputs=TRUE)
+
+#source("https://bioconductor.org/biocLite.R")
+#biocLite("arrayQualityMetrics")
+#biocLite("AnnotationForge")
+#biocLite("AnnotationDbi")
+#biocLite("mogene20stprobeset.db")
+#install.packages('knitr', repos='http://www.rforge.net/', type='source')
+#biocLite("oligo")
+
+library(arrayQualityMetrics)
+library(Biobase) #Biobase_2.34.0  
+library(AnnotationForge) #AnnotationForge_1.16.0
+library(AnnotationDbi) #AnnotationDbi_1.36.1 
+library(knitr)
+library(rgl)
+library(limma)
+library(affycoretools)
+
+#install.packages("mogene20sttranscriptcluster.db_8.4.0.tar.gz", repos=NULL, type = #"source")
+#install.packages("AnnotationDbi_1.32.3.tar.gz", repos=NULL,type="source")
+#install.packages("AnnotationForge_1.12.2.tar.gz",repos=NULL,type="source") #Failed
+#install.packages("Biobase_2.32.0.tar.gz",repos=NULL,type=source) #Failed
+
+options(scipen = 1, digits = 2)
+knitr::opts_chunk$set(dev="png")
+knit_hooks$set(webgl = hook_webgl)
+knit_hooks$set(rgl = function(before, options, envir) {
+  if (!before) {
+    ## after a chunk has been evaluated
+    if (rgl.cur() == 0) return()  # no active device
+    name = paste(options$fig.path, options$label, sep = '')
+    rgl.snapshot(paste(name, '.png', sep = ''), fmt = 'png')
+    return(paste('\\includegraphics{', name, '}\n', sep = ''))
+  }
+})
+
+knit_hooks$set(webgl = hook_webgl)
+```
+
+### *Load data from local directory:*
+
+```{r, message=FALSE, warning=FALSE}
+
+setwd("/Users/maggiec/GitHub/Maggie/ccbr668/data/")
+setwd("CSAS_18476_ScottMadina_moGeneST20_070716_cel")
+
+#require(devtools)
+#install_version("oligo", version = "1.34.2", repos = "http://bioconductor.org")
+#install.packages("oligo_1.34.2.tgz",repos=NULL, type = "source")
+
+library(oligo)  # older version is 1.34.2, current v = 1.38.0
+library(pd.mogene.2.0.st)  #Version: 3.14.1, Packaged: 2015-06-19 21:46:46 UTC; benilton
+
+# Ran the following and loaded later:
+# celFiles <- list.celfiles()
+# affyData <- read.celfiles(celFiles)
+# pd<-read.AnnotatedDataFrame("covdesc",header=TRUE,sep="\t")
+# x <- varMetadata(pd)
+# x <- data.frame(x, channel = "_ALL_")
+# varMetadata(pd) <- x
+# phenoData(affyData) = pd
+
+load(".RData")   #Loads preanalyzed data
+cat("Loaded Files and Phenotypes")
+pData(affyData)
+
+# arrayQualityMetrics(expressionset = affyData,
+#                     outdir = "QCReport",
+#                     force = TRUE,
+#                     do.logtransform = TRUE)
+
+```
+
+### *QC Check: Look at raw expression distributions*
+
+```{r QC raw, message=FALSE, warning=FALSE, webgl=TRUE}
+
+library(ggplot2)
+library(reshape2)
+library(matrixStats)
+
+#e=exprs(affyData) #Done
+
+df.m <- melt(as.data.frame(e))
+ggplot(df.m) + 
+  geom_density(aes(x = value, colour = variable, linetype = variable)) + 
+  labs(x = NULL) +
+  theme(legend.position='right') + scale_x_log10() + ggtitle("Raw Counts") +
+  scale_linetype_manual(values=rep(c('solid', 'dashed','dotted'),6))
+
+par(mar=c(10,7,1,1))
+boxplot(log(value)~variable,las=2,data=df.m,main="Raw Signal", 
+  	ylab="Signal",col=as.numeric(as.factor(pData(affyData)$Substrate)))
+
+```
+
+### *QC Check: Look at normalized expression distributions*
+
+```{r QC-norm, message=FALSE, warning=FALSE}
+
+#eset = oligo::rma(affyData) #Done
+# arrayQualityMetrics(expressionset = eset,
+#                     outdir = "QCReport_norm",
+#                     force = TRUE,
+#                     do.logtransform = TRUE)
+
+eset=annotateEset(eset,pd.mogene.2.0.st)  #Annotate with affycore
+e <- exprs(eset)
+colnames(e) = pData(eset)$Sample
+##Plots for Normalized Data:
+df.m <- melt(as.data.frame(e))
+ggplot(df.m) + 
+  geom_density(aes(x = value, colour = variable, linetype = variable)) + 
+  labs(x = NULL) +
+  theme(legend.position='right') + scale_x_log10() + ggtitle("Normalized Counts") +
+  scale_linetype_manual(values=rep(c('solid', 'dashed','dotted'),6))
+
+par(mar=c(10,7,1,1))
+boxplot(log(value)~variable,las=2,data=df.m,main="Normalized Signal", 
+  	ylab="Signal",col=as.numeric(as.factor(pData(affyData)$Substrate)))
+
+```
+
+
+### *Heatmap for most variable genes:*
+
+
+```{r Heatmap, message=FALSE, warning=FALSE}
+
+#library(mogene20stprobeset.db)
+#library(mogene20sttranscriptcluster.db)
+#key=keys(mogene20sttranscriptcluster.db) #probeset level
+
+#annot = AnnotationDbi::select(mogene20sttranscriptcluster.db, keys=key, 
+#          columns=c("SYMBOL","REFSEQ","GENENAME"),keytype="PROBEID")
+#annot=annot[!duplicated(annot$PROBEID), ]
+
+library(d3heatmap)
+dim(e)
+colnames(e)=pData(affyData)$Sample
+e.filt=e[,1:15]
+means <- rowMeans(e.filt)
+vars <- apply(e.filt,1,var)
+cv2 <- vars/means^2
+e.heat=e[order(cv2,decreasing=TRUE),][1:30,]
+annot=pData(featureData(eset))
+probe=rownames(e.heat)
+e.heat.gene=annot$SYMBOL[match(probe,annot$PROBEID)]
+
+cat("Heatmap of 30 most variable genes")
+d3heatmap(e.heat, scale = "row",labRow = e.heat.gene,colors = "RdYlBu",
+          xaxis_font_size="10px", yaxis_font_size="10px") 
+
+e.heat.gene.2=annot$SYMBOL[match(probe,annot$PROBEID)]
+
+#Test: this is the old
+# annot[which(annot$PROBEID=="17544786"),]
+#         PROBEID   SYMBOL       REFSEQ           GENENAME
+# 205948 17544786 Tmsb15b1 NM_001081983 thymosin beta 15b1
+
+```
+
+####Choosing Colors:
+```{r, eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+
+library(RColorBrewer)
+bp = brewer.pal(11,"RdBu")
+library(colourschemes)
+
+library(colorspace)
+col <- colorRampPalette(brewer.pal(10, "RdYlBu"))
+#palette=colorRampPalette(c("blue", "red"))( 4 ) 
+
+pal <- choose_palette()
+pal(12) # check heatmap colors
+#To get the function: sequential_hcl, change with parameters from above
+
+sequential_hcl2 <- function (n, h = -125, c. = c(80, 0), l = c(30, 90), power = 1.5, 
+    gamma = NULL, fixup = TRUE, alpha = 1, ...) 
+{
+    if (!is.null(gamma)) 
+        warning("'gamma' is deprecated and has no effect")
+    if (n < 1L) 
+        return(character(0L))
+    c <- rep(c., length.out = 2L)
+    l <- rep(l, length.out = 2L)
+    power <- rep(power, length.out = 2L)
+    rval <- seq(1, 0, length = n)
+    rval <- hex(polarLUV(L = l[2L] - diff(l) * rval^power[2L], 
+        C = c[2L] - diff(c) * rval^power[1L], H = h[1L]), fixup = fixup, 
+        ...)
+    if (!missing(alpha)) {
+        alpha <- pmax(pmin(alpha, 1), 0)
+        alpha <- format(as.hexmode(round(alpha * 255 + 0.0001)), 
+            width = 2L, upper.case = TRUE)
+        rval <- paste(rval, alpha, sep = "")
+    }
+    return(rval)
+}
+
+s=seq(-1,1,len=100)
+cs = rampInterpolate(c(-1,1),pal(12)) #using choose_palette()
+cs = rampInterpolate(c(-1,1),col(12))
+plot(s,s,col=cs(s),pch=19)
+np=sequential_hcl(64, h = c(260, 0), c = 80, l = c(30, 90), power = 1.5)
+palette(np)
+```
+
+### *PCA plot:*
+
+```{r PCA, message=FALSE, warning=FALSE,webgl=TRUE}
+
+library(rgl)
+palette(rainbow(6)) 
+te=t(e)
+tedf = as.data.frame(te)
+tedf.mat=(as.matrix(tedf))
+pca=prcomp(tedf.mat)
+Treat <- factor(pData(eset)$Substrate) 
+Rep <- factor(pData(eset)$Rep)
+
+
+cat("\n\nPrincipal Components Analysis:\n\n")
+plot3d(pca$x[,1:3],col=as.numeric(as.factor(Treat)), 
+       type="s",size=2)
+group.v<-as.vector(paste(Treat,Rep))
+text3d(pca$x, pca$y, pca$z, group.v, cex=0.6, adj = 1.5) 
+#rgl.postscript("pca3d_Qindiv.pdf","pdf")
+
+```
+
+### *Run Differential Expression vs. Glass (filtered out Isolate 4):*
+
+```{r, message=FALSE, warning=FALSE, comment=NA}
+
+library(DT)
+options(scipen = 1, digits = 2)
+eset.filt=eset[,1:15]  # Filtered outlier sample (Isolate 4)
+Treat = pData(eset.filt)$Substrate
+design <- model.matrix(~0+Treat)
+cat("design:")
+design
+
+fit <- lmFit(eset.filt, design)
+cm <- makeContrasts(IsolvsGlass = TreatISOLATE-TreatGLASS, 
+                    LowvsGlass = TreatLow-TreatGLASS,
+                    MedvsGlass = TreatMed-TreatGLASS,
+                    IsolvsLow = TreatISOLATE-TreatLow,
+                    Diff = (TreatISOLATE-TreatGLASS)-(TreatLow-TreatGLASS),
+                    levels=design) 
+fit2 <- contrasts.fit(fit, cm)
+fit2 <- eBayes(fit2)
+
+# cat("Some Results:")
+# #head(as.data.frame(fit2))
+# colnames(as.data.frame(fit2))
+# numcol=dim(topTable(fit2,coef = 1))[2]
+
+# cat("Top genes in Isolate vs Glass, pval < 0.01")
+# DT::datatable(data = topTable(fit2, coef=1, p.value=0.01,number=100),
+#   extensions = 'KeyTable',
+#   options = list(
+#   lengthMenu = list(c(5, 10, 15, 20, 25, -1), 
+#   c('5', '10', '15', '20', '25', 'All')),
+#   keys = TRUE)) %>% formatRound(columns=c(1:numcol), digits=3)
+
+# 
+# cat("Top genes in Low vs Glass, pval < 0.01")
+# DT::datatable(data = topTable(fit2, coef=2, p.value=0.01,number=100),
+#   extensions = 'KeyTable',
+#   options = list(
+#   lengthMenu = list(c(5, 10, 15, 20, 25, -1), 
+#   c('5', '10', '15', '20', '25', 'All')),
+#   keys = TRUE)) %>% formatRound(columns=c(1:numcol), digits=3)
+
+# 
+# cat("Top genes in Medium vs Glass, pval < 0.01")
+# DT::datatable(data = topTable(fit2, coef=3, p.value=0.01,number=100),
+#   extensions = 'KeyTable',
+#   options = list(
+#   lengthMenu = list(c(5, 10, 15, 20, 25, -1), 
+#   c('5', '10', '15', '20', '25', 'All')),
+#   keys = TRUE)) %>% formatRound(columns=c(1:numcol), digits=3)
+# 
+# 
+# cat("Top genes in Isolate vs Low, pval < 0.01")
+# DT::datatable(data = topTable(fit2, coef=4, p.value=0.01,number=100),
+#   extensions = 'KeyTable',
+#   options = list(
+#   lengthMenu = list(c(5, 10, 15, 20, 25, -1), 
+#   c('5', '10', '15', '20', '25', 'All')),
+#   keys = TRUE)) %>% formatRound(columns=c(1:numcol), digits=3)
+# 
+# cat("Top genes in Diff (TreatISOLATE-TreatGLASS)-(TreatLow-TreatGLASS), pval < 0.01")
+# DT::datatable(data = topTable(fit2, coef=5, p.value=0.01,number=100),
+#   extensions = 'KeyTable',
+#   options = list(
+#   lengthMenu = list(c(5, 10, 15, 20, 25, -1), 
+#   c('5', '10', '15', '20', '25', 'All')),
+#   keys = TRUE)) %>% formatRound(columns=c(1:numcol), digits=3)
+
+
+colnames(as.data.frame(fit2))
+finalres=cbind(as.data.frame(fit2)[,c(13,14,15,16,36)])
+
+FC = 2^fit2$coefficients
+FC = ifelse(FC<1,-1/FC,FC)
+colnames(FC)=paste(colnames(FC),"FC",sep="_")
+#colnames(FC)
+pvalall=fit2$p.value
+colnames(pvalall)=paste(colnames(pvalall),"pval",sep="_")
+#colnames(pvalall)
+pvaladjall=apply(pvalall,2,function(x) p.adjust(x,"BH"))
+colnames(pvaladjall)=paste(colnames(fit2$coefficients),"adjpval",sep="_")
+
+#finalres = as.data.frame(cbind(finalres,e,FC,pvalall,pvaladjall))
+finalres2 = as.data.frame(cbind(finalres,e,FC,pvalall,pvaladjall))
+finalres2.sort=finalres2[with(finalres2, order(F.p.value)),]
+#head(finalres2.sort)
+numcol=dim(finalres2.sort)[2]
+
+#rownames(combat_miR.lin) <- NULL
+cat("\n\n\nAll results for groups vs Glass:")
+
+DT::datatable(data = finalres2.sort,
+  extensions = 'KeyTable',
+  options = list(
+  lengthMenu = list(c(5, 10, 15, 20, 25, -1), 
+  c('5', '10', '15', '20', '25', 'All')),
+  keys = TRUE)) %>% formatRound(columns=c(5:numcol), digits=3)
+
+#head(finalres)
+write.table(finalres2.sort,file="All_Results_Substrates2.txt",
+           row.names=FALSE,sep="\t",quote=FALSE)
+finalres2.sort
+saveRDS(finalres2.sort, "finalres2.rds")
+
+```
+
+####*Run Differential Expression vs. Isolate (filtered out Isolate 4):*
+
+```{r, message=FALSE, warning=FALSE, comment=NA}
+
+fit <- lmFit(eset.filt, design)
+cm2 <- makeContrasts(LowvsIsol = TreatLow-TreatISOLATE,
+                    MedvsIsol = TreatMed-TreatISOLATE,
+                    GlassvsIsol = TreatGLASS-TreatISOLATE,
+                    GlassvsLow = TreatGLASS-TreatLow,
+                    Diff = (TreatGLASS-TreatISOLATE)-(TreatGLASS-TreatLow),
+                    levels=design) 
+fit3 <- contrasts.fit(fit, cm2)
+fit3 <- eBayes(fit3)
+
+cat("Some Results:")
+#as.data.frame(fit3)
+
+cat("Top genes in Low vs Isolate, pval < 0.01")
+DT::datatable(data = topTable(fit3, coef=1, p.value=0.01,number=100),
+  extensions = 'KeyTable',
+  options = list(
+  lengthMenu = list(c(5, 10, 15, 20, 25, -1), 
+  c('5', '10', '15', '20', '25', 'All')),
+  keys = TRUE)) %>% formatRound(columns=c(1:numcol), digits=3)
+
+
+cat("Top genes in Medium vs Isolate, pval < 0.01")
+DT::datatable(data = topTable(fit3, coef=2, p.value=0.01,number=100),
+  extensions = 'KeyTable',
+  options = list(
+  lengthMenu = list(c(5, 10, 15, 20, 25, -1), 
+  c('5', '10', '15', '20', '25', 'All')),
+  keys = TRUE)) %>% formatRound(columns=c(1:numcol), digits=3)
+
+
+cat("Top genes in Glass vs Isolate, pval < 0.01")
+DT::datatable(data = topTable(fit3, coef=3, p.value=0.01,number=100),
+  extensions = 'KeyTable',
+  options = list(
+  lengthMenu = list(c(5, 10, 15, 20, 25, -1), 
+  c('5', '10', '15', '20', '25', 'All')),
+  keys = TRUE)) %>% formatRound(columns=c(1:numcol), digits=3)
+
+cat("Top genes in Glass vs Low, pval < 0.01")
+DT::datatable(data = topTable(fit3, coef=4, p.value=0.01,number=100),
+  extensions = 'KeyTable',
+  options = list(
+  lengthMenu = list(c(5, 10, 15, 20, 25, -1), 
+  c('5', '10', '15', '20', '25', 'All')),
+  keys = TRUE)) %>% formatRound(columns=c(1:numcol), digits=3)
+
+cat("Top genes in Diff (TreatGLASS-TreatISOLATE)-(TreatGLASS-TreatLow), pval < 0.01")
+DT::datatable(data = topTable(fit3, coef=5, p.value=0.01,number=100),
+  extensions = 'KeyTable',
+  options = list(
+  lengthMenu = list(c(5, 10, 15, 20, 25, -1), 
+  c('5', '10', '15', '20', '25', 'All')),
+  keys = TRUE)) %>% formatRound(columns=c(1:numcol), digits=3)
+
+
+#colnames(as.data.frame(fit2))
+finalres=cbind(as.data.frame(fit2)[,c(13,14,15,16,36)])
+
+FC.I = 2^fit3$coefficients
+FC.I = ifelse(FC.I<1,-1/FC.I,FC.I)
+colnames(FC.I)=paste(colnames(FC.I),"FC",sep="_")
+#colnames(FC)
+pvalall.I=fit3$p.value
+colnames(pvalall.I)=paste(colnames(pvalall.I),"pval",sep="_")
+#colnames(pvalall)
+pvaladjall.I=apply(pvalall.I,2,function(x) p.adjust(x,"BH"))
+colnames(pvaladjall.I)=paste(colnames(fit3$coefficients),"adjpval",sep="_")
+
+#finalres = as.data.frame(cbind(finalres,e,FC,pvalall,pvaladjall))
+finalres3 = as.data.frame(cbind(finalres,FC.I,pvalall.I,pvaladjall.I))
+finalres3.sort=finalres3[with(finalres3, order(F.p.value)),]
+head(finalres3.sort)
+numcol=dim(finalres3.sort)[2]
+
+library(DT)
+
+cat("All results for groups vs Isolates:")
+DT::datatable(data = finalres3.sort,
+  extensions = 'KeyTable',
+  options = list(
+  lengthMenu = list(c(5, 10, 15, 20, 25, -1), 
+  c('5', '10', '15', '20', '25', 'All')),
+  keys = TRUE)) %>% formatRound(columns=c(5:numcol), digits=3)
+
+#head(finalres)
+#write.table(finalres3.sort,file="All_Results_Substrates3.txt",
+#            col.names=NA,sep="\t",quote=FALSE)
+
+rm(affyData)
+
+```
+
+### *Heatmap for selected Oncogenes/Tumor Suppressor genes:*
+
+```{r, fig.height=7, fig.width=7, message=FALSE, warning=FALSE}
+
+library(heatmap3)
+Oncogenes=c("Mtor","Cdkn1a","Ccnd1","Brca2","Brca1","Bcl2","Cdkn1b","Akt3","Erbb3",
+            "Ccne2","Skp2","Erbb2","Egfr","Src","Pten","Akt2","Atm","Akt1","Tgfb2",
+            "Myc","Ccne1","Chek2","Trp53","Pik3ca","Rb1","Erbb4")
+
+cat("\n\n\nOncogenes/Tumor Supressors List:")
+Oncogenes
+
+#Get Ratios first:
+finalres3.Onc=finalres3[match(Oncogenes,finalres3$genes.SYMBOL),c(3,6,7,8)]
+finalres3.Onc$group=c("1","2","1","2","2","2","2","1","1","1","1","1","1","1","2",
+                      "1","2","1","1","1","1","2","2","1","2","1")
+
+finalres3.Onc=finalres3.Onc[order(finalres3.Onc$group),]
+
+cat("Differential Expression Levels")
+e.gene=e[match(rownames(finalres3.Onc),rownames(e)),]
+rownames(e.gene)=annot$SYMBOL[match(rownames(e.gene),annot$PROBEID)]
+
+cat("\n\n\nOncogenes/Tumor Suppressors Expression:")
+DT::datatable(data = e.gene,
+  extensions = 'KeyTable',
+  options = list(
+  lengthMenu = list(c(5, 10, 15, 20, 25, -1), 
+  c('5', '10', '15', '20', '25', 'All')),
+  keys = TRUE)) %>% formatRound(columns=c(1:numcol), digits=3)
+
+col <- colorRampPalette(c("red", "lightyellow", "blue"), space = "rgb") # FINAL, use this! 
+#e.gene.scale=t(scale(t(e.gene[,-16])))
+#head(e.gene.scale)
+group=finalres3.Onc$group
+colorblock=c("steelblue2","lightgoldenrod","green","red","orange")
+
+showLegend2 <- function (legend = c("Group A", "Group B"), lwd = 3, cex = 1.1,
+col = c("red", "blue"), ...)
+{
+plot(0, xaxt = "n", bty = "n", yaxt = "n", type = "n", xlab = "",
+ylab = "")
+legend("topright", legend = legend, lwd = lwd, col = col,
+bty = "n", cex = cex, ...)
+}
+#<environment: namespace:heatmap3>
+
+library(GMD)
+
+e.gene.sort=e.gene[,c(9,10,11,12,5,6,7,8,1,2,3,4,13,14,15)]
+x11()
+#par(mfrow=c(2,2))
+heatmap3(as.matrix(e.gene.sort),Colv = NA,
+         scale="row",margins=c(10,10),
+         RowSideColors=colorblock[as.integer(group)])
+par(new = T)
+showLegend2(legend=c("Oncogene","Tumor Suppressor"),
+   col=c("steelblue2","lightgoldenrod","brown1"),cex=0.5)
+
+ratio=as.data.frame(FC[match(rownames(finalres3.Onc),rownames(FC)),])
+ratio$group=finalres3.Onc$group
+rownames(ratio)=annot$SYMBOL[match(rownames(ratio),annot$PROBEID)]
+ratio=ratio[order(rowMax(as.matrix(ratio[,1:4])),decreasing = TRUE),]
+
+
+cat("\n\n\nFold Change of groups vs Glass:")
+DT::datatable(data = ratio,
+  extensions = 'KeyTable') %>% formatRound(columns=c(1:numcol), digits=3)
+
+library(plotly)
+data=as.data.frame(cbind(genes=rownames(ratio),as.matrix(ratio[,c(1:3)])))
+data$group=ratio$group
+indx <- sapply(data, is.factor)
+indx[1]=FALSE
+data[indx] <- lapply(data[indx], function(x) as.numeric(as.character(x)))
+#data$genes <- factor(data$genes, 
+#      levels = unique(data$genes)[order(data[,2], decreasing = TRUE)])
+data=data[order(data[,2]),]
+
+m <- list(l=250, r=50, b=50, t=100, pad=10)
+c <- list(color=c("black"),size=18)
+
+line <- list(type = "line", 
+             fillcolor = "blue", 
+             line    = list(color = "blue"), 
+              opacity = 0.3, 
+              xref    = "x",
+              y0      = -1,
+              y1      = 26,
+              yref    = "y")
+
+lines <- list()
+for (i in c(1,-1)) {
+  line[["x0"]] <- 1.5*i
+  line[["x1"]] <- 1.5*i
+  lines <- c(lines, list(line))
+}
+
+p <- plot_ly(data, x = ~LowvsGlass_FC, y = ~genes, type = 'bar', 
+            orientation = 'h',
+            name = 'Low vs Glass',
+            marker = list(color = 'rgba(246, 78, 139, 0.6)',
+            line = list(color = 'rgba(246, 78, 139, 1.0)',
+            width = 3))) %>%
+   add_trace(x = ~IsolvsGlass_FC, name = 'Isolate vs Glass',
+            marker = list(color = 'rgba(58, 71, 80, 0.6)',
+            line = list(color = 'rgba(58, 71, 80, 1.0)',
+            width = 3))) %>% layout(margin=m) %>%
+  layout(title ="Interactive Bar Plot for Isolate and Low vs. Glass\n\n",
+           xaxis = list(title="Fold Change", 
+           range=c(-4,4),dtick=0.5),
+           yaxis = list(title="",
+                tickvals=~genes,
+                ticktext=~genes,
+                tickfont= c),
+           shapes  = lines)
+
+p
+
+ratio.I=FC.I[match(rownames(finalres3.Onc),rownames(FC.I)),]
+rownames(ratio.I)=annot$SYMBOL[match(rownames(ratio.I),annot$PROBEID)]
+
+cat("\n\n\nFold Change of groups vs Isolates:\n\n")
+DT::datatable(data = ratio.I,
+  extensions = 'KeyTable') %>% formatRound(columns=c(1:numcol), digits=3)
+
+# Volcano Plot
+fit3.df=as.data.frame(fit3)
+#colnames(fit3.df)
+
+data.v=fit3.df[match(rownames(finalres3.Onc),rownames(fit3.df)),
+          c("genes.SYMBOL","coefficients.GlassvsIsol",
+            "p.value.GlassvsIsol","t.GlassvsIsol")]
+#data.v=data.v[order(-abs(data.v$t.GlassvsIsol)), ]
+data.v$FC=data.v$coefficients.GlassvsIsol
+data.v$FC2=2^data.v$coefficients.GlassvsIsol
+data.v$FC2 = ifelse(data.v$FC<1,-1/data.v$FC,data.v$FC)
+data.v=cbind(data.v,finalres3.Onc$group)
+
+cat("\n\nOncogenes in Glass vs. Isolate\n\n")
+p <- plot_ly(data.v, x = ~FC, 
+    y = ~-log10(p.value.GlassvsIsol), type = 'scatter', mode='markers',  
+    showlegend = FALSE, hoverinfo="text",
+    text = ~genes.SYMBOL, 
+    color = ~group, colors = "Set1") %>%
+    layout(title ="Interactive Volcano Plot for Glass vs. Isolate <br>
+           (red:oncogenes, grey:tumor suppressors, pink:p=0.05)",
+           xaxis = list(title="Fold Change", 
+            range=c(-2,2),
+            tickvals=c(-2,-1.585,-1,-0.585,-0.263,0,0.263,0.585,1,1.585,2),
+            ticktext=c('-4','-3','-2','-1.5','-1.2','1','1.2','1.5','2','3','4')),
+           yaxis = list(title="-log10 pvalue", range = c(0, 15))) 
+
+p %>% add_trace(x=seq(-4,4,length.out=length(data.v[,1])),
+         y = rep(1.3,26), color=I("pink"),
+         type = 'scatter', mode = 'lines',showlegend = FALSE)
+
+
+data.v=fit3.df[match(rownames(finalres3.Onc),rownames(fit3.df)),c(15,25,1,21)]
+data.v$FC=data.v$coefficients.LowvsIsol
+data.v$FC2=2^data.v$coefficients.LowvsIsol
+data.v$FC2 = ifelse(data.v$FC<1,-1/data.v$FC,data.v$FC)
+data.v=cbind(data.v,finalres3.Onc$group)
+
+
+cat("\n\nOncogenes in Low vs. Isolate\n\n")
+p <- plot_ly(data.v, x = ~FC, 
+    y = ~-log10(p.value.LowvsIsol), type = 'scatter', mode='markers',  
+    showlegend = FALSE, hoverinfo="text",
+    text = ~genes.SYMBOL, 
+    color = ~group, colors = "Set1") %>%
+    layout(title ="Interactive Volcano Plot for Low vs. Isolate <br>
+          (red:oncogenes, grey:tumor suppressors, pink:p=0.05)",
+      xaxis = list(title="Fold Change", 
+      range=c(-2,2),
+      tickvals=c(-2,-1.585,-1,-0.585,-0.263,0,0.263,0.585,1,1.585,2),
+      ticktext=c('-4','-3','-2','-1.5','-1.2','1','1.2','1.5','2','3','4')),
+      yaxis = list(title="-log10 pvalue", range = c(0, 15))) 
+
+p %>% add_trace(x=seq(-4,4,length.out=length(data.v[,1])),
+         y = rep(1.3,26), color=I("pink"),
+         type = 'scatter', mode = 'lines',showlegend = FALSE)
+
+
+data=finalres3.Onc
+indx <- sapply(data, is.factor)
+indx[1]=FALSE
+data[indx] <- lapply(data[indx], function(x) as.numeric(as.character(x)))
+
+m <- list(l=100, r=80, b=80, t=100, pad=30)
+f <- list(size = 14,color="#0000FF")
+data=data[order(data[,4]),]
+
+c <- list(color=~group,size=18)
+line <- list(type = "line", 
+             fillcolor = "blue", 
+             line    = list(color = "blue"), 
+              opacity = 0.3, 
+              xref    = "x",
+              y0      = -1,
+              y1      = 26,
+              yref    = "y")
+
+lines <- list()
+for (i in c(1,-1)) {
+  line[["x0"]] <- 1.5*i
+  line[["x1"]] <- 1.5*i
+  lines <- c(lines, list(line))
+}
+p <- plot_ly(data, x = ~LowvsIsol_FC, y = ~genes.SYMBOL, type = 'bar', 
+            orientation = 'h',
+            name = 'Low vs Isolate',
+            marker = list(color = 'rgba(246, 78, 139, 0.6)',
+            line = list(color = 'rgba(246, 78, 139, 1.0)',
+            width = 3))) %>%
+   add_trace(x = ~GlassvsIsol_FC, name = 'Glass vs Isolate',
+            marker = list(color = 'rgba(58, 71, 80, 0.6)',
+            line = list(color = 'rgba(58, 71, 80, 1.0)',
+            width = 3))) %>% layout(margin=m) %>%
+  layout(title ="Interactive Bar Plot for Glass and Low vs. Isolate\n\n",
+           xaxis = list(title="Fold Change", 
+           range=c(-6,6),dtick=0.5),
+           yaxis = list(title="",
+                tickvals=~genes.SYMBOL,
+                ticktext=~genes.SYMBOL,
+                tickfont=c),
+           shapes=lines)
+p
+
+```
+
+### *Heatmap for selected PTX Resistance genes:*
+
+```{r, fig.height=7, fig.width=7, message=FALSE, warning=FALSE}
+
+PTXRes=c("Abca5","Yap1","Frmd6","Ing4","Ing1","Cdkn1a","Fadd","Brca1","Tubb4b","Cyp3a16","Scgb3a1","Lzts1","Pten","Pdcd4","Pinx1","Apc","Rassf1","Abca8a","Cdkn2a","Plk2","Rest","Fbxw7","Zmynd10","Tgfbi","Abcb1b","Bax","Cyp3a11","Trp53","Cyp3a41b","Cyp3a13")
+
+cat("\n\n\nPTX Resistance List:")
+PTXRes
+
+finalres3.Ptx=finalres3[match(PTXRes,finalres3$genes.SYMBOL),c(3,6,7,8)]
+
+cat("Differential Expression Levels")
+e.gene=e[match(rownames(finalres3.Ptx),rownames(e)),]
+rownames(e.gene)=annot$SYMBOL[match(rownames(e.gene),annot$PROBEID)]
+
+cat("\n\n\nPTX Resistance Genes:")
+DT::datatable(data = e.gene,
+  extensions = 'KeyTable',
+  options = list(
+  lengthMenu = list(c(5, 10, 15, 20, 25, -1), 
+  c('5', '10', '15', '20', '25', 'All')),
+  keys = TRUE)) %>% formatRound(columns=c(1:numcol), digits=3)
+
+col <- colorRampPalette(c("red", "lightyellow", "blue"), space = "rgb") # FINAL, use this! 
+e.gene.sort=e.gene[,c(9,10,11,12,5,6,7,8,1,2,3,4,13,14,15)]
+x11()
+#par(mfrow=c(2,2))
+heatmap3(as.matrix(e.gene.sort),Colv = NA,
+         scale="row",margins=c(10,10))
+
+#Get Ratio for barplot:
+ratio=FC[match(rownames(finalres3.Ptx),rownames(FC)),]
+rownames(ratio)=annot$SYMBOL[match(rownames(ratio),annot$PROBEID)]
+
+cat("\n\n\nFold Change of groups vs Glass:")
+DT::datatable(data = ratio,
+  extensions = 'KeyTable') %>% formatRound(columns=c(1:numcol), digits=3)
+
+data=as.data.frame(cbind(genes=rownames(ratio),as.matrix(ratio[,c(1:3)])))
+indx <- sapply(data, is.factor)
+indx[1]=FALSE
+data[indx] <- lapply(data[indx], function(x) as.numeric(as.character(x)))
+m <- list(l=100, r=80, b=80, t=100, pad=30)
+f <- list(size = 14,color="#0000FF")
+data=data[order(data[,2]),]
+
+c <- list(color=~group,size=18)
+
+line <- list(type = "line", 
+             fillcolor = "blue", 
+             line    = list(color = "blue"), 
+              opacity = 0.3, 
+              xref    = "x",
+              y0      = -1,
+              y1      = length(PTXRes),
+              yref    = "y")
+
+lines <- list()
+for (i in c(1,-1)) {
+  line[["x0"]] <- 1.5*i
+  line[["x1"]] <- 1.5*i
+  lines <- c(lines, list(line))
+}
+
+p <- plot_ly(data, x = ~IsolvsGlass_FC, y = ~genes, type = 'bar', 
+            orientation = 'h',
+            name = 'Isolate vs Glass',
+            marker = list(color = 'rgba(246, 78, 139, 0.6)',
+            line = list(color = 'rgba(246, 78, 139, 1.0)',
+            width = 3))) %>%
+   add_trace(x = ~LowvsGlass_FC, name = 'Low vs Glass',
+            marker = list(color = 'rgba(58, 71, 80, 0.6)',
+            line = list(color = 'rgba(58, 71, 80, 1.0)',
+            width = 3))) %>% layout(margin=m) %>%
+  layout(title ="Interactive Bar Plot for Low and Isolate vs Glass\n\n",
+           xaxis = list(title="Fold Change", 
+           range=c(-6,6),dtick=0.5),
+           yaxis = list(title="",
+                tickvals=~genes,
+                ticktext=~genes,
+                tickfont=c),
+         shapes=lines)
+p
+
+cat("\n\n\nFold Change of groups vs Isolates:")
+
+ratio.I=FC.I[match(rownames(finalres3.Ptx),rownames(FC.I)),]
+rownames(ratio.I)=annot$SYMBOL[match(rownames(ratio.I),annot$PROBEID)]
+DT::datatable(data = ratio.I,
+  extensions = 'KeyTable') %>% formatRound(columns=c(1:numcol), digits=3)
+
+data=finalres3.Ptx
+data[indx] <- lapply(data[indx], function(x) as.numeric(as.character(x)))
+m <- list(l=100, r=80, b=80, t=100, pad=30)
+f <- list(size = 14,color="#0000FF")
+data=data[order(data[,4]),]
+
+c <- list(color=~group,size=14)
+
+line <- list(type = "line", 
+             fillcolor = "blue", 
+             line    = list(color = "blue"), 
+              opacity = 0.3, 
+              xref    = "x",
+              y0      = -1,
+              y1      = length(PTXRes),
+              yref    = "y")
+
+lines <- list()
+for (i in c(1,-1)) {
+  line[["x0"]] <- 1.5*i
+  line[["x1"]] <- 1.5*i
+  lines <- c(lines, list(line))
+}
+p <- plot_ly(data, x = ~LowvsIsol_FC, y = ~genes.SYMBOL, type = 'bar', 
+            orientation = 'h',
+            name = 'Low vs Isol',
+            marker = list(color = 'rgba(246, 78, 139, 0.6)',
+            line = list(color = 'rgba(246, 78, 139, 1.0)',
+            width = 3))) %>%
+   add_trace(x = ~GlassvsIsol_FC, name = 'Glass vs Isol',
+            marker = list(color = 'rgba(58, 71, 80, 0.6)',
+            line = list(color = 'rgba(58, 71, 80, 1.0)',
+            width = 3))) %>% layout(margin=m) %>%
+  layout(title ="Interactive Bar Plot for Glass and Low vs Isolate\n\n",
+           xaxis = list(title="Fold Change", 
+           range=c(-6,6),dtick=0.5),
+           yaxis = list(title="",
+                tickvals=~genes.SYMBOL,
+                ticktext=~genes.SYMBOL,
+                tickfont=c),
+         shapes=lines)
+p
+
+fit3.df=as.data.frame(fit3)
+#colnames(fit3.df)
+
+data.v=fit3.df[match(rownames(finalres3.Ptx),rownames(fit3.df)),
+          c("genes.SYMBOL","coefficients.GlassvsIsol",
+            "p.value.GlassvsIsol","t.GlassvsIsol")]
+#data.v=data.v[order(-abs(data.v$t.GlassvsIsol)), ]
+data.v$FC=data.v$coefficients.GlassvsIsol
+data.v$FC2=2^data.v$coefficients.GlassvsIsol
+data.v$FC2 = ifelse(data.v$FC<1,-1/data.v$FC,data.v$FC)
+
+cat("\n\nOncogenes in Glass vs. Isolate\n\n")
+p <- plot_ly(data.v, x = ~FC, 
+    y = ~-log10(p.value.GlassvsIsol), type = 'scatter', mode='markers',  
+    showlegend = FALSE, hoverinfo="text",
+    text = ~genes.SYMBOL) %>%
+    layout(title ="Interactive Volcano Plot for Glass vs. Isolate <br>
+           (pink:p=0.05)",
+           xaxis = list(title="Fold Change", 
+            range=c(-2,2),
+            tickvals=c(-2,-1.585,-1,-0.585,-0.263,0,0.263,0.585,1,1.585,2),
+            ticktext=c('-4','-3','-2','-1.5','-1.2','1','1.2','1.5','2','3','4')),
+           yaxis = list(title="-log10 pvalue", range = c(0, 15))) 
+
+p %>% add_trace(x=seq(-4,4,length.out=length(data.v[,1])),
+         y = rep(1.3,dim(data)[1]), color=I("pink"),
+         type = 'scatter', mode = 'lines',showlegend = FALSE)
+
+
+data.v=fit3.df[match(rownames(finalres3.Ptx),rownames(fit3.df)),
+          c("genes.SYMBOL","coefficients.LowvsIsol",
+            "p.value.LowvsIsol","t.LowvsIsol")]
+#data.v=data.v[order(-abs(data.v$t.LowvsIsol)), ]
+data.v$FC=data.v$coefficients.LowvsIsol
+data.v$FC2=2^data.v$coefficients.LowvsIsol
+data.v$FC2 = ifelse(data.v$FC<1,-1/data.v$FC,data.v$FC)
+
+cat("\n\nOncogenes in Low vs. Isolate\n\n")
+p <- plot_ly(data.v, x = ~FC, 
+    y = ~-log10(p.value.LowvsIsol), type = 'scatter', mode='markers',  
+    showlegend = FALSE, hoverinfo="text",
+    text = ~genes.SYMBOL) %>%
+    layout(title ="Interactive Volcano Plot for Low vs. Isolate <br>
+           (pink:p=0.05)",
+           xaxis = list(title="Fold Change", 
+            range=c(-2,2),
+            tickvals=c(-2,-1.585,-1,-0.585,-0.263,0,0.263,0.585,1,1.585,2),
+            ticktext=c('-4','-3','-2','-1.5','-1.2','1','1.2','1.5','2','3','4')),
+           yaxis = list(title="-log10 pvalue", range = c(0, 15))) 
+
+p %>% add_trace(x=seq(-4,4,length.out=length(data.v[,1])),
+         y = rep(1.3,dim(data)[1]), color=I("pink"),
+         type = 'scatter', mode = 'lines',showlegend = FALSE)
+
+```
+
+### *Heatmap for selected MTX/5FU Resistance genes:*
+
+```{r, fig.height=7, fig.width=7, message=FALSE, warning=FALSE}
+
+MTXRes=c("Slc46a1","Slc19a1","Bcl2","Abcc2","Abcg2","Dpyd","Abcc3","Dhfr","Abcb1b","Tyms","Fpgs","Abcc1","Ggh")
+
+cat("\n\n\nMTX/5FU Resistance List:")
+MTXRes
+
+finalres3.Mtx=finalres3[match(MTXRes,finalres3$genes.SYMBOL),c(3,6,7,8)]
+
+cat("Differential Expression Levels")
+e.gene=e[match(rownames(finalres3.Mtx),rownames(e)),]
+rownames(e.gene)=annot$SYMBOL[match(rownames(e.gene),annot$PROBEID)]
+
+cat("\n\n\nMTX/5FU Resistance Genes:")
+DT::datatable(data = e.gene,
+  extensions = 'KeyTable',
+  options = list(
+  lengthMenu = list(c(5, 10, 15, 20, 25, -1), 
+  c('5', '10', '15', '20', '25', 'All')),
+  keys = TRUE)) %>% formatRound(columns=c(1:numcol), digits=3)
+
+col <- colorRampPalette(c("red", "lightyellow", "blue"), space = "rgb") # FINAL, use this! 
+e.gene.sort=e.gene[,c(9,10,11,12,5,6,7,8,1,2,3,4,13,14,15)]
+x11()
+#par(mfrow=c(2,2))
+heatmap3(as.matrix(e.gene.sort),Colv = NA,
+         scale="row",margins=c(10,10))
+
+#Get Ratio for barplot:
+ratio=FC[match(rownames(finalres3.Mtx),rownames(FC)),]
+rownames(ratio)=annot$SYMBOL[match(rownames(ratio),annot$PROBEID)]
+
+cat("\n\n\nFold Change of groups vs Glass:")
+DT::datatable(data = ratio,
+  extensions = 'KeyTable') %>% formatRound(columns=c(1:numcol), digits=3)
+
+data=as.data.frame(cbind(genes=rownames(ratio),as.matrix(ratio[,c(1:3)])))
+indx <- sapply(data, is.factor)
+indx[1]=FALSE
+data[indx] <- lapply(data[indx], function(x) as.numeric(as.character(x)))
+m <- list(l=100, r=80, b=80, t=100, pad=30)
+f <- list(size = 14,color="#0000FF")
+data=data[order(data[,2]),]
+
+c <- list(color=~group,size=18)
+line <- list(type = "line", 
+             fillcolor = "blue", 
+             line    = list(color = "blue"), 
+              opacity = 0.3, 
+              xref    = "x",
+              y0      = -1,
+              y1      = length(MTXRes),
+              yref    = "y")
+
+lines <- list()
+for (i in c(1,-1)) {
+  line[["x0"]] <- 1.5*i
+  line[["x1"]] <- 1.5*i
+  lines <- c(lines, list(line))
+}
+p <- plot_ly(data, x = ~IsolvsGlass_FC, y = ~genes, type = 'bar', 
+            orientation = 'h',
+            name = 'Isolate vs Glass',
+            marker = list(color = 'rgba(246, 78, 139, 0.6)',
+            line = list(color = 'rgba(246, 78, 139, 1.0)',
+            width = 3))) %>%
+   add_trace(x = ~LowvsGlass_FC, name = 'Low vs Glass',
+            marker = list(color = 'rgba(58, 71, 80, 0.6)',
+            line = list(color = 'rgba(58, 71, 80, 1.0)',
+            width = 3))) %>% layout(margin=m) %>%
+  layout(title ="Interactive Bar Plot for Low and Isolate vs Glass\n\n",
+           xaxis = list(title="Fold Change", 
+           range=c(-4,4),dtick=0.5),
+           yaxis = list(title="",
+                tickvals=~genes,
+                ticktext=~genes,
+                tickfont=c),
+         shapes=lines)
+p
+
+ratio.I=FC.I[match(rownames(finalres3.Mtx),rownames(FC.I)),]
+rownames(ratio.I)=annot$SYMBOL[match(rownames(ratio.I),annot$PROBEID)]
+
+cat("\n\n\nFold Change of groups vs Isolates:")
+DT::datatable(data = ratio.I,
+  extensions = 'KeyTable') %>% formatRound(columns=c(1:numcol), digits=3)
+
+data=finalres3.Mtx
+indx <- sapply(data, is.factor)
+indx[1]=FALSE
+data[indx] <- lapply(data[indx], function(x) as.numeric(as.character(x)))
+m <- list(l=100, r=80, b=80, t=100, pad=30)
+
+data=data[order(data[,4]),]
+c <- list(color=~group,size=14)
+line <- list(type = "line", 
+             fillcolor = "blue", 
+             line    = list(color = "blue"), 
+              opacity = 0.3, 
+              xref    = "x",
+              y0      = -1,
+              y1      = length(MTXRes),
+              yref    = "y")
+
+lines <- list()
+for (i in c(1,-1)) {
+  line[["x0"]] <- 1.5*i
+  line[["x1"]] <- 1.5*i
+  lines <- c(lines, list(line))
+}
+p <- plot_ly(data, x = ~GlassvsIsol_FC, y = ~genes.SYMBOL, type = 'bar', 
+            orientation = 'h',
+            name = 'Glass vs Isolate',
+            marker = list(color = 'rgba(246, 78, 139, 0.6)',
+            line = list(color = 'rgba(246, 78, 139, 1.0)',
+            width = 3))) %>%
+   add_trace(x = ~LowvsIsol_FC, name = 'Low vs Isol',
+            marker = list(color = 'rgba(58, 71, 80, 0.6)',
+            line = list(color = 'rgba(58, 71, 80, 1.0)',
+            width = 3))) %>% layout(margin=m) %>%
+  layout(title ="Interactive Bar Plot for Glass and Low vs Isolate\n\n",
+           xaxis = list(title="Fold Change", 
+           range=c(-8,8),dtick=0.5),
+           yaxis = list(title="",
+                tickvals=~genes.SYMBOL,
+                ticktext=~genes.SYMBOL,
+                tickfont=c),
+         shapes=lines)
+p
+
+```
+
+### *Heatmap for selected TAM Resistance genes:*
+
+```{r, fig.height=7, fig.width=7, message=FALSE, warning=FALSE}
+
+TAMRes=c("Ndufs6","Rab27b","Ifitm2","Tssc4","Rplp1","Slc12a9","Ints12","Sirt3",
+         "Atp6v0e2","Csnk2a2","Abhd10","Tatdn1","Atp5e","Hist1h2bm","Reep6",
+         "Ubc","Hist1h3h","Tmsb15b1","Cav2")
+
+cat("\n\n\nTAM Resistance List:")
+TAMRes
+
+finalres3.Tam=finalres3[match(TAMRes,finalres3$genes.SYMBOL),c(3,6,7,8)]
+
+cat("Differential Expression Levels")
+e.gene=e[match(rownames(finalres3.Tam),rownames(e)),]
+rownames(e.gene)=annot$SYMBOL[match(rownames(e.gene),annot$PROBEID)]
+
+cat("\n\n\nTam Resistance Genes:")
+DT::datatable(data = e.gene,
+  extensions = 'KeyTable',
+  options = list(
+  lengthMenu = list(c(5, 10, 15, 20, 25, -1), 
+  c('5', '10', '15', '20', '25', 'All')),
+  keys = TRUE)) %>% formatRound(columns=c(1:numcol), digits=3)
+
+col <- colorRampPalette(c("red", "lightyellow", "blue"), space = "rgb") # FINAL, use this! 
+e.gene.sort=e.gene[,c(9,10,11,12,5,6,7,8,1,2,3,4,13,14,15)]
+x11()
+#par(mfrow=c(2,2))
+heatmap3(as.matrix(e.gene.sort),Colv = NA,
+         scale="row",margins=c(10,10))
+
+#Get Ratio for barplot:
+ratio=FC[match(rownames(finalres3.Tam),rownames(FC)),]
+rownames(ratio)=annot$SYMBOL[match(rownames(ratio),annot$PROBEID)]
+
+cat("\n\n\nFold Change of groups vs Glass:")
+DT::datatable(data = ratio,
+  extensions = 'KeyTable') %>% formatRound(columns=c(1:numcol), digits=3)
+
+data=as.data.frame(cbind(genes=rownames(ratio),as.matrix(ratio[,c(1:3)])))
+indx <- sapply(data, is.factor)
+indx[1]=FALSE
+data[indx] <- lapply(data[indx], function(x) as.numeric(as.character(x)))
+m <- list(l=100, r=80, b=80, t=100, pad=30)
+f <- list(size = 14,color="#0000FF")
+data=data[order(data[,2]),]
+
+c <- list(color=~group,size=12)
+line <- list(type = "line", 
+             fillcolor = "blue", 
+             line    = list(color = "blue"), 
+              opacity = 0.3, 
+              xref    = "x",
+              y0      = -1,
+              y1      = length(TAMRes),
+              yref    = "y")
+
+lines <- list()
+for (i in c(1,-1)) {
+  line[["x0"]] <- 1.5*i
+  line[["x1"]] <- 1.5*i
+  lines <- c(lines, list(line))
+}
+p <- plot_ly(data, x = ~IsolvsGlass_FC, y = ~genes, type = 'bar', 
+            orientation = 'h',
+            name = 'Isolate vs Glass',
+            marker = list(color = 'rgba(246, 78, 139, 0.6)',
+            line = list(color = 'rgba(246, 78, 139, 1.0)',
+            width = 3))) %>%
+   add_trace(x = ~LowvsGlass_FC, name = 'Low vs Glass',
+            marker = list(color = 'rgba(58, 71, 80, 0.6)',
+            line = list(color = 'rgba(58, 71, 80, 1.0)',
+            width = 3))) %>% layout(margin=m) %>%
+  layout(title ="Interactive Bar Plot for Low and Isolate vs Glass\n\n",
+           xaxis = list(title="Fold Change", 
+           range=c(-3,3),dtick=0.5),
+           yaxis = list(title="",
+                tickvals=~genes,
+                ticktext=~genes,
+                tickfont=c),
+         shapes=lines)
+p
+
+
+ratio.I=FC.I[match(rownames(finalres3.Tam),rownames(FC.I)),]
+rownames(ratio.I)=annot$SYMBOL[match(rownames(ratio.I),annot$PROBEID)]
+
+cat("\n\n\nFold Change of groups vs Isolates:")
+DT::datatable(data = ratio.I,
+  extensions = 'KeyTable') %>% formatRound(columns=c(1:numcol), digits=3)
+
+data=finalres3.Tam
+indx <- sapply(data, is.factor)
+indx[1]=FALSE
+data[indx] <- lapply(data[indx], function(x) as.numeric(as.character(x)))
+m <- list(l=100, r=80, b=80, t=100, pad=30)
+
+data=data[order(data[,4]),]
+c <- list(color=~group,size=12)
+line <- list(type = "line", 
+             fillcolor = "blue", 
+             line    = list(color = "blue"), 
+              opacity = 0.3, 
+              xref    = "x",
+              y0      = -1,
+              y1      = length(TAMRes),
+              yref    = "y")
+
+lines <- list()
+for (i in c(1,-1)) {
+  line[["x0"]] <- 1.5*i
+  line[["x1"]] <- 1.5*i
+  lines <- c(lines, list(line))
+}
+p <- plot_ly(data, x = ~GlassvsIsol_FC, y = ~genes.SYMBOL, type = 'bar', 
+            orientation = 'h',
+            name = 'Glass vs Isolate',
+            marker = list(color = 'rgba(246, 78, 139, 0.6)',
+            line = list(color = 'rgba(246, 78, 139, 1.0)',
+            width = 3))) %>%
+   add_trace(x = ~LowvsIsol_FC, name = 'Low vs Isol',
+            marker = list(color = 'rgba(58, 71, 80, 0.6)',
+            line = list(color = 'rgba(58, 71, 80, 1.0)',
+            width = 3))) %>% layout(margin=m) %>%
+  layout(title ="Interactive Bar Plot for Glass and Low vs Isolate\n\n",
+           xaxis = list(title="Fold Change", 
+           range=c(-3,3),dtick=0.5),
+           yaxis = list(title="",
+                tickvals=~genes.SYMBOL,
+                ticktext=~genes.SYMBOL,
+                tickfont=c),
+         shapes=lines)
+p
+
+```
+
+```{r, message=FALSE, warning=FALSE}
+cat("Session Info:")
+sessionInfo()
+```
+
+```{r, eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+
+#Try plotly
+library(plotly)
+bar.onc=t(finalres3.Onc[,2:4])
+colnames(bar.onc)=finalres3.Onc$genes
+barplot(as.matrix(bar.onc), main="My Barchart", 
+        ylab = "Numbers", cex.lab = 1.5, cex.main = 1.4, 
+        beside=TRUE, horiz=TRUE)
+
+a <- list()
+for (i in seq_len(nrow(top_peaks))) {
+  m <- top_peaks[i, ]
+  a[[i]] <- list(
+    x = m[["Fold"]],
+    y = -log10(m[["FDR"]]),
+    text = m[["external_gene_name"]],
+    xref = "x",
+    yref = "y",
+    showarrow = TRUE,
+    arrowhead = 0.5,
+    ax = 20,
+    ay = -40
+  )
+}
+
+
+# make the Plot.ly plot
+p <- plot_ly(diff_df, x = ~Fold, y = ~-log10(FDR), 
+    text = ~external_gene_name, mode = "markers", color = ~group) %>% 
+    layout(title ="Volcano Plot") %>%
+    layout(annotations = a)
+p
+
+trace1 <- [x=c(-5,5)
+p <- plot_ly(finalres3.Onc, x = ~GlassvsIsol_FC, y = ~LowvsIsol_FC, 
+    text = ~genes, type = 'scatter', mode = 'lines', color = ~group) %>% 
+    layout(title ="Scatter Plot") 
+    %>%
+    add_trace(y = ~trace_2, name = 'trace 2', mode = 'lines+markers')
+    add_lines(x = c(-5, 5), y = c(-5, 5))
+p
+
+#write.table(finalres3.Onc,file="Oncogenes_vsIsolate.txt",
+#            row.names=FALSE,sep="\t",quote=FALSE)
+
+
+```
+
+
+
+```{r, eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+####*Get Top Genes*===========
+topgenes.pval=topTable(fit2, coef="LowvsGlass",n=50,sort.by="p")
+topgenes.up=genelist[(genelist$LowvsGlass>1.5) & (genelist$P.Value<0.05),]
+topgenes.down=genelist[(genelist$LowvsGlass<-1.5) & (genelist$P.Value<0.05),]
+
+#upgenes=factor(genelist$SYMBOL[genelist$LowvsGlass>1.2 & genelist$P.Value<0.10])
+upgenes=factor(finalres$SYMBOL[finalres$LowvsGlass_FC > 1.5 & finalres$LowvsGlass_pval < 0.05])
+upgenes.df=data.frame(upgenes)
+#upgenes.df=upgenes.df[is.na(upgenes.df$upgenes)==FALSE,]
+upgenes.df$upgenes_count <- 1
+
+dim(upgenes.df)
+#downgenes=factor(genelist$SYMBOL[genelist$LowvsGlass< -1 & genelist$P.Value<0.10])
+downgenes=factor(finalres$SYMBOL[finalres$LowvsGlass_FC < -1.5 & finalres$LowvsGlass_pval < 0.05])
+downgenes.df=data.frame(downgenes)
+downgenes.df$downgenes_count <- 1
+dim(downgenes.df)
+
+#Venn of UPregulated genes:
+Diff_up_up2=merge(upgenes.df, upgenes2.df, by.x="upgenes", by.y="upgenes2", all=T )
+head(Diff_up_up2)
+Diff_up_up2$upgenes_count[is.na(Diff_up_up2$upgenes_count)] <- 0
+Diff_up_up2$upgenes_count2[is.na(Diff_up_up2$upgenes_count2)] <- 0
+vennData<-Diff_up_up2[,2:3]
+a <- vennCounts(vennData)
+colnames(a) <- c('up', 'up2','Counts')
+vennDiagram(a, main='Comparison of DE genes from 2 analyses')
+title(main='Subtitle', cex.main=0.9)
+
+#Venn of DOWNregulated genes:
+Diff_down_down2=merge(downgenes.df, downgenes2.df, by.x="downgenes", by.y="downgenes2", all=T )
+head(Diff_down_down2)
+Diff_down_down2$downgenes_count[is.na(Diff_down_down2$downgenes_count)] <- 0
+Diff_down_down2$downgenes_count2[is.na(Diff_down_down2$downgenes_count2)] <- 0
+vennData<-Diff_down_down2[,2:3]
+b <- vennCounts(vennData)
+colnames(b) <- c('down', 'down2','Counts')
+vennDiagram(b, main='Comparison of DE genes from 2 analyses')
+title(main='Subtitle', cex.main=0.9)
+
+#Original Heatmap 
+#using pvals for selecting top genes:
+topgenes_data=e[rownames(e) %in% rownames(topgenes.pval),]
+colnames(topgenes_data)=paste(pData(eset)$Substrate,rep(c(1,2,3,4),3),sep="_")
+topgenes_data=topgenes_data[match(rownames(topgenes.pval),rownames(topgenes_data)),]
+topgenes_data=as.data.frame(topgenes_data)
+topgenes_data$SYMBOL=topgenes.pval$SYMBOL
+topgenes_data$mean = rowMeans(topgenes_data[,1:12])
+#top_diff <- group_by(topgenes_data, SYMBOL)
+tg_group = topgenes_data %>% group_by(SYMBOL) %>% top_n(n=1)
+tg=as.data.frame(tg_group[,c(5:12,1:4)])
+rownames(tg)=tg_group$SYMBOL
+
+#using correlations for selecting top genes:
+
+topgenes_data=topgenes.df[1:50,4:15]
+rownames(topgenes_data)=topgenes.df$PROBEID[1:50]
+colnames(topgenes_data)=paste(pData(eset)$Substrate,rep(c(1,2,3,4),3),sep="_")
+topgenes_data$SYMBOL=topgenes.df$SYMBOL[1:50]
+topgenes_data$mean = rowMeans(topgenes_data[,1:12])
+
+tg_group = topgenes_data %>% group_by(SYMBOL) %>% top_n(n=1)
+tg=as.data.frame(tg_group[,c(5:12,1:4)])
+rownames(tg)=tg_group$SYMBOL
+
+
+
+d3heatmap(tg, scale = "row", dendrogram = "none", main = "title",
+    color = "YlOrRd",cexRow=1,main="topgenes")
+
+
+```
+
+
+
+```{r, eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+####*Linear model*==================
+
+Treatnum=as.numeric(c(rep("1",4),rep("0.05",4),rep("0.005",4)))
+em=e
+colnames(em)=Treatnum
+resultlist <- apply(em, 1, function(y) lm(y ~ Treatnum)) 
+resultcoeffs <- apply(em, 1, function(y) lm(y ~ Treatnum)$coefficients) 
+names(resultlist[[1]])
+
+summary(resultlist[[2]])[4][[1]][8]
+
+lmcoeff=lapply(resultlist,function(y) summary(y)[8])
+lmcoeff.df=as.data.frame(unlist(lmcoeff))
+lmpval=lapply(resultlist,function(y) summary(y)[4][[1]][8])
+lmpval.df=as.data.frame(unlist(lmpval))
+lmslope=lapply(resultlist,function(y) summary(y)[4][[1]][2])
+lmslope.df=as.data.frame(unlist(lmslope))
+lm.df=cbind(lmslope.df,lmcoeff.df,lmpval.df)
+colnames(lm.df)=c("slope","coeff","pval")
+coeff=lm.df$coeff
+pval=lm.df$pval
+head(lm.df[order(pval),])
+topgenes=lm.df[order(pval),]
+
+###plot 
+
+edt=melt(em)
+head(edt)
+colnames(edt)=c("probe","hardness","exp")
+
+#fit <- lm(exp ~ hardness + probe, data=edt)
+#lapply(datlist, function(d) lm(exp ~ hardness + probe, data=edt))
+install.packages("devtools")
+library(devtools)
+install_github("easyGgplot2", "kassambara")
+
+topgenes.up.df=subset(topgenes, slope < -0.4 & pval<0.0001)
+topgenes.up.df$PROBEID=rownames(topgenes.up.df)
+topgenes.up.df=merge(topgenes.up.df, gns, by.x="PROBEID", by.y="PROBEID", all=T )
+
+upgenes2=factor(topgenes.up.df$SYMBOL[is.na(topgenes.up.df$slope)==FALSE])
+upgenes2.df=data.frame(upgenes2)
+upgenes2.df$upgenes_count2 <- 1
+
+topgenes.down.df=subset(topgenes, slope > 0.4 & pval<0.0001)
+topgenes.down.df$PROBEID=rownames(topgenes.down.df)
+topgenes.down.df=merge(topgenes.down.df, gns, by.x="PROBEID", by.y="PROBEID", all=T )
+
+downgenes2=factor(topgenes.down.df$SYMBOL[is.na(topgenes.down.df$slope)==FALSE])
+downgenes2.df=data.frame(downgenes2)
+downgenes2.df$downgenes_count2 <- 1
+
+options(digits = 4)
+print(1e5)
+setwd("../results")
+layout( matrix(c(1,1, 2, 3, 3, 4), nrow=3, ncol=2) )
+
+fignum=dim(topgenes.up.df)[1]/16
+fignum=dim(topgenes.down.df)[1]/16
+
+j=1
+for (i in 0:fignum){
+png(filename=paste(i,"png",sep="."),width = 1200, height = 1200)
+par(mfrow=c(4,4))
+par(mar = rep(2, 4))
+j=i*16+1
+l=j+15
+for (k in j:l){
+probename=rownames(topgenes.down.df[k,])
+#probename="11756310_a_at"
+genename=gns[match(probename,gns$PROBEID),]
+genename=genename[2:3]
+#png(filename=paste(probename,"png",sep="."))
+Probe=edt[edt$probe==probename,]
+z<-lm(exp ~ hardness,data=Probe)
+plot(Probe$hardness,Probe$exp,main=genename, cex.main=1.0, col = "dark red")
+#points(Probe$hardness,Probe$exp, cex = 1.0, col = "dark red")
+lines(Probe$hardness,fitted(z))
+txt=paste("r2=",sprintf("%.4f",topgenes.down.df[k,2]),", p=",
+            sprintf("%0.4g",topgenes.down.df[k,3]),sep=" ")
+text(0.8,max(Probe$exp),txt)
+}
+dev.off()
+}
+
+topgenes.df=cbind(lm.df,data.frame(e))
+topgenes.df$PROBEID=rownames(topgenes.df)
+topgenes.df=merge(topgenes.df, gns, by.x="PROBEID", by.y="PROBEID", all=T )
+topgenes.df=topgenes.df[order(-abs(topgenes.df[,2])), ]
+topgenes.df=topgenes.df[topgenes.df$pval<0.001,]
+
+write.table(topgenes.df,file="substrate_results.txt",col.names=TRUE,
+           row.names=TRUE,sep="\t",quote=FALSE)
+
+```
+

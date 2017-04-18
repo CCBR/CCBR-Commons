@@ -66,8 +66,8 @@ x <- DGEList(counts=fc$counts, genes=fc$annotation)
 
 ```{r,eval=TRUE, echo=FALSE}
 setwd("/Users/maggiec/GitHub/Maggie/ccbr638/")
-#load("data/ccbr638.RData")
-load("data/ccbr638_2.RData")
+load("data/ccbr638.RData")
+#load("data/ccbr638_2.RData")
 
 ls()
 
@@ -102,9 +102,9 @@ library(ggplot2)
 library(reshape)
 
 fc1filt=as.data.frame(fc1filt)
-fc1filtnames=paste(targets$Phenotype,targets$Replicate)
+fc1filtnames=paste(targets$Phenotype,targets$Replicate,sep=".")
 #fc1filtnames=sapply(strsplit(colnames(fc1filt),split="\\."),function(x) x[2])
-colnames(fc1filt)=paste(targets$Phenotype,targets$Replicate)
+colnames(fc1filt)=paste(targets$Phenotype,targets$Replicate,sep = ".")
 
 
 df.m <- melt(as.data.frame(fc1filt))
@@ -121,16 +121,35 @@ boxplot(log(value)~variable,las=2,data=df.m,main="Raw Signal",
 ####*Data is normalized by TMM: filtered number of genes*
 
 ```{r,fig.width=10, fig.height=5, echo=FALSE, warning=FALSE, message=FALSE}
+library(IDPmisc)
+library(HTSFilter)
 
 x <- DGEList(counts=fc$counts, genes=fc$annotation)
+
+#Try filtering step
+x_filt=HTSFilter(x$counts, targets$Phenotype, s.len=25, plot=TRUE)
+hist(log(x_filt$filteredData+1), col="grey", breaks=25, main="",
+ xlab="Log(counts+1)")
+remdata=rownames(x_filt$removedData)
+
 isexpr <- rowSums(cpm(x)>0.5) >= 2
 hasannot <- rowSums(is.na(x$genes))==0
 x <- x[isexpr & hasannot,keep.lib.sizes=FALSE]
 
 #Number of filtered genes 
 dim(x)
+#[1] 13015    16
 
 x <- calcNormFactors(x)
+
+#Pairwise Correlations (Within Group)
+logcpm=cpm(x,log=TRUE)
+i=1
+while (i <= 13){
+  j=i+3
+ipairs(logcpm[,i:j], pixs=0.5, main=targets$Phenotype[i])
+i=i+4
+}
 
 par(mfrow=c(2,4))
 for (i in 1:dim(x)[2]){
@@ -148,13 +167,17 @@ design <- model.matrix(~0+celltype)
 dev.off()
 #v <- voom(x,design,plot=TRUE,normalize="quantile")
 v <- voom(x,design,plot=TRUE)
+colnames(v$E)=paste(targets$Phenotype,targets$Replicate,sep=".")
+
+
 ```
 
 ####*After Normalization*
 
 ```{r, echo=FALSE,webgl=TRUE}
+library(rglwidget)
 
-colnames(v$E)=paste(fc1filtnames,targets$Replicate)
+colnames(v$E)=fc1filtnames
 df.m <- melt(as.data.frame(v$E))
 
 ggplot(df.m) + 
@@ -180,8 +203,27 @@ plot(pca,type="lines")  #Decide how many PC's are relevant for plotting
 plot3d(pca$x[,1:3],col = as.integer(tedf1$group),type="s",size=2)
 group.v<-as.vector(cell_rep)
 text3d(pca$x, pca$y, pca$z, group.v, cex=1.0, adj = 1.2) 
-#rgl.postscript("pca3d_indiv.pdf","pdf")
+rgl.postscript("pca3d_indiv_APC.pdf","pdf")
 ```
+
+####*Run Similarity Heatmap*
+```{r, echo=FALSE,warning=FALSE,message=FALSE}
+
+library(amap)
+library(lattice) 
+
+d=Dist(tedf,method="pearson",diag=TRUE)
+m=as.matrix(d)
+
+new.palette=colorRampPalette(c("black","red","yellow","white"),space="rgb")
+#levelplot(m[1:ncol(m),ncol(m):1],col.regions=new.palette(20))
+heatmap(m,symm=TRUE,col=new.palette(20))
+
+
+
+```
+
+
 ####*Statistical Analysis of Experimental groups (lmFit)*
 
 ```{r, echo=FALSE, warning=FALSE, message=FALSE}
@@ -193,25 +235,25 @@ colnames(design)=levels(celltype)
 
 colnames(design)
 fit <- lmFit(v,design)   
-#cm <- makeContrasts(Con_PsvsCB=Con_Ps-Con_CB, APC_PsvsCB=APC_Ps-APC_CB,
-#                    Diff=(APC_Ps-APC_CB)-(Con_Ps-Con_CB), levels=design)
-cm <- makeContrasts(HBB_PsvsCB=HBB_Ps-HBB_CB, Pkp4_PsvsCB=Pkp4_Ps-Pkp4_CB,
-                    Diff=(Pkp4_Ps-Pkp4_CB)-(HBB_Ps-HBB_CB), levels=design)
+cm <- makeContrasts(Con_PsvsCB=Con_Ps-Con_CB, APC_PsvsCB=APC_Ps-APC_CB,
+                    Diff=(APC_Ps-APC_CB)-(Con_Ps-Con_CB), levels=design)
+#cm <- makeContrasts(HBB_PsvsCB=HBB_Ps-HBB_CB, Pkp4_PsvsCB=Pkp4_Ps-Pkp4_CB,
+#                    Diff=(Pkp4_Ps-Pkp4_CB)-(HBB_Ps-HBB_CB), levels=design)
 
 fit2 <- contrasts.fit(fit, cm)
 fit2 <- eBayes(fit2)
 topgenes=topTable(fit2, coef="Diff",n=50,sort.by="p")
 
-#volcanoplot(fit2,coef="HBB_PsvsCB")
-#volcanoplot(fit2,coef="Pkp4_PsvsCB")
-#volcanoplot(fit2,coef="Diff") 
 
 FC = 2^(fit2$coefficients)
 FC = ifelse(FC<1,-1/FC,FC)
 colnames(FC)=paste(colnames(fit2$coefficients),"FC",sep="_")
 pval=fit2$p.value
 colnames(pval)=paste(colnames(fit2$p.value),"pval",sep="_")
-res=cbind(FC,pval)
+res=as.data.frame(cbind(FC,pval))
+
+res$filt=""
+res$filt <- ifelse(rownames(res) %in% remdata=="TRUE", "low", "high")
 DT::datatable(res)
 
 finalres=topTable(fit2,coef="Diff",sort="none",n=Inf)
@@ -219,6 +261,8 @@ finalres=cbind(v$E,FC,pval)
 #head(finalres)
 
 write.table(finalres,file="RNASeq_results.txt",sep="\t")
+
+
 ```
 ```{r, echo=FALSE, message=FALSE,warning=FALSE}
 
@@ -254,6 +298,7 @@ merge_gene2$count1[!is.na(merge_gene2$Con_PsvsCB_FC.x)] <- 1
 merge_gene2$count2[is.na(merge_gene2$Diff_FC.y)] <- 0
 merge_gene2$count2[!is.na(merge_gene2$Diff_FC.y)] <- 1
 
+<<<<<<< .merge_file_WdtlTq
 vennData2<-merge_gene2[,46:47]
 b <- vennCounts(vennData2)
 colnames(b) <- c('Con_PSvsCB', 'APCvsCon_PSvsCB','Counts')
@@ -264,6 +309,42 @@ vennDiagram(b, main='APC vs Con Protrusions vs Cell Body',cex=c(1.5,1,0.7))
 dev.off()
 
 
+=======
+####*Volcano Plot*
+```{r, echo=FALSE, message=FALSE,warning=FALSE}
+
+library(ggplot2)
+library(plotly)
+
+
+#x2_filt=HTSFilter(x2$counts, targets$Phenotype, s.len=25, plot=TRUE)
+#hist(log(x2_filt$filteredData+1), col="grey", breaks=25, main="",
+# xlab="Log(counts+1)")
+
+#attributes(x_filt)
+#$names
+#[1] "filteredData" "on"           "s"            "indexValues"  "normFactor"   #"removedData"
+
+dim(x_filt$filteredData)
+
+volcano_data=as.data.frame(cbind(fit2$coefficients[,3],
+            -1*log10(fit2$p.value[,3])))
+
+
+#filt_rpkm <- apply(gene_rpkm, 1, function(x) length(x[x>0.3])>=1)
+#volcano_data=cbind(volcano_data,filt_rpkm)
+
+volcano_data$filt=""
+volcano_data$filt <- ifelse(rownames(volcano_data) %in% remdata=="TRUE", "low", "high")
+volcano_data=cbind(volcano_data,rownames(volcano_data))
+colnames(volcano_data)=c("FC","log_pval","filt","genes")
+
+ggvolc <- qplot(FC, log_pval, data = volcano_data, col=filt)
+ggplotly(ggvolc)
+
+DT::datatable(volcano_data)
+
+>>>>>>> .merge_file_m8TaPw
 ```
 ####*Heatmap: Top genes*
 
@@ -288,8 +369,10 @@ d3heatmap(topgenes_data, scale = "row", dendrogram = "none", main = "title",
 
 datadir="/Users/maggiec/Github/Maggie/ccbr638/results"
 setwd(datadir)
-write.table(finalres,file="Pkp4_HBB_FCpval.txt",
+write.table(finalres,file="APC_Con_FCpval.txt",
       row.names=TRUE,col.names=TRUE,sep="\t",quote=FALSE)
+#write.table(finalres,file="Pkp4_HBB_FCpval.txt",
+#      row.names=TRUE,col.names=TRUE,sep="\t",quote=FALSE)
 
 ```
 

@@ -220,7 +220,51 @@ finalres=cbind(v$E,FC,pval)
 
 write.table(finalres,file="RNASeq_results.txt",sep="\t")
 ```
+```{r, echo=FALSE, message=FALSE,warning=FALSE}
 
+finalres.df=as.data.frame(finalres)
+finalres.df$genes=rownames(finalres.df)
+finalressig.df=finalres.df[(finalres.df$Con_PsvsCB_FC>2 & finalres.df$Con_PsvsCB_pval<0.05),]
+finalressig2.df=finalres.df[(finalres.df$APC_PsvsCB_FC>2 & finalres.df$APC_PsvsCB_pval<0.05),]
+merge_gene=merge(finalressig.df, finalressig2.df,by.x="genes", 
+                 by.y="genes", all=T )
+
+merge_gene$count1[is.na(merge_gene$Con_PsvsCB_FC.x)] <- 0
+merge_gene$count1[!is.na(merge_gene$Con_PsvsCB_FC.x)] <- 1
+merge_gene$count2[is.na(merge_gene$APC_PsvsCB_FC.y)] <- 0
+merge_gene$count2[!is.na(merge_gene$APC_PsvsCB_FC.y)] <- 1
+
+vennData<-merge_gene[,46:47]
+a <- vennCounts(vennData)
+colnames(a) <- c('Con_PSvsCB', 'APC_PSvsCB','Counts')
+
+png(filename="venn_PsvsCB.png",
+    width=3.25,height=3.25,units="in",res=1200,pointsize = 4)
+vennDiagram(a, main='Protrusions vs Cell Body',cex.main=2.0)
+dev.off()
+
+##Diff of Ps vs CB differences
+
+finalressig3.df=finalres.df[(finalres.df$Diff_FC<1 & finalres.df$Diff_pval<0.05),]
+merge_gene2=merge(finalressig.df, finalressig3.df,by.x="genes", 
+                 by.y="genes", all=T )
+
+merge_gene2$count1[is.na(merge_gene2$Con_PsvsCB_FC.x)] <- 0
+merge_gene2$count1[!is.na(merge_gene2$Con_PsvsCB_FC.x)] <- 1
+merge_gene2$count2[is.na(merge_gene2$Diff_FC.y)] <- 0
+merge_gene2$count2[!is.na(merge_gene2$Diff_FC.y)] <- 1
+
+vennData2<-merge_gene2[,46:47]
+b <- vennCounts(vennData2)
+colnames(b) <- c('Con_PSvsCB', 'APCvsCon_PSvsCB','Counts')
+
+png(filename="venn_APC_PsvsCB.png",
+    width=3.25,height=3.25,units="in",res=1200,pointsize = 4)
+vennDiagram(b, main='APC vs Con Protrusions vs Cell Body',cex=c(1.5,1,0.7))
+dev.off()
+
+
+```
 ####*Heatmap: Top genes*
 
 ```{r, echo=FALSE, message=FALSE,warning=FALSE}

@@ -14,13 +14,131 @@ library(genomation)
 target=readTargets()
 bam.files=target$files
 
+regions=read.delim("mouse_prom_1000_rev_sort_chr.txt",header=FALSE,sep="\t")
+prom_regions=GRanges(regions$V2,IRanges(regions$V3,regions$V4))
+#reg.counts<-regionCounts(bam.files,param=readParam(pe="none"),prom_regions)
+
+```
+```{r Run ahead of time and save files}
+
+#Set up parameters to do window counts, using dedup, discard repeats:
+repeats=read.table("mm9-blacklist.bed")
+repeats.gr=GRanges(repeats$V1,IRanges(repeats$V2,repeats$V3))
+param=readParam(minq=10, dedup=TRUE,discard=repeats.gr)
+
+#win=list()  
+#collected=list()
+#Get the profiles around 
+for (bam in bam.files) {
+  windowed <- windowCounts(bam, spacing=50, width=50, param=param, filter=20)
+  win[[bam]] <- windowed
+  rwsms <- rowSums(assay(windowed))
+  maxed <- findMaxima(rowRanges(windowed), range=1000, metric=rwsms)
+  collected[[bam]] <- profileSites(bam, rowRanges(windowed)[maxed], 
+          param=param, weight=1/rwsms[maxed])}
+
+save(win,file="win.RData")  #Takes long time to run - run 1x and save.
+
+profile(win,collected,"csaw.all.png")
+
+```
+```{r Profile plot function}
+
+#Function to take the aggregate of the signal:
+profile <- function(w,x,y){
+xranged <- as.integer(names(x[[1]]))
+ymax=max(unlist(lapply(x ,function(x) max(x))))/3
+plot.new()
+png(y)
+plot(xranged, (x[[1]]/w[[1]]$totals)*10e6, type="l", col="blue", 
+     xlim=c(-1000, 1000), ylim=c(0,ymax),lwd=2,xlab="Distance (bp)",
+     ylab="Relative coverage per base")
+lines(xranged, (x[[2]]/w[[2]]$totals)*10e6, col="forestgreen", lwd=2)
+lines(xranged, (x[[3]]/w[[3]]$totals)*10e6, col="grey", lwd=2)
+lines(xranged, (x[[4]]/w[[4]]$totals)*10e6, col="red", lwd=2)
+lines(xranged, (x[[5]]/w[[5]]$totals)*10e6, col="orange", lwd=2)
+lines(xranged, (x[[6]]/w[[6]]$totals)*10e6, col="cyan", lwd=2)
+
+legend("topleft", col=c("blue","forestgreen","grey","red","orange","cyan"),
+       target$CellType, pch=16)
+dev.off()
+}
+abline(v=c(-177,177), col="dodgerblue", lty=2)
+
+```
+
+```{r}
+
+###Taking TSS regions from all ChIP sites using csaw windows:
+
+TSSregions.list=list()
+for (i in 1:6){
+rwsms <- rowSums(assay(win[[i]]))
+maxed <- findMaxima(rowRanges(win[[i]]), range=1000, metric=rwsms)
+allregions=rowRanges(win[[i]])[maxed]
+peakTSS=suppressWarnings(findOverlaps(allregions,prom_regions))
+TSSregions.list[[i]]=allregions[queryHits(peakTSS),]
+}
+
+TSSregall=GRanges()
+for (j in 2:5){
+TSSregall=GenomicRanges::union(TSSregall,TSSregions.list[[j]])
+}
+
+collected.tss=list()
+for (bam in bam.files){
+collected.tss[[bam]]=profileSites(bam, TSSregall, param=param, weight=1/rwsms[maxed])
+}
+
+profile(win,collected.tss,"csaw.tss.png")
+
+```
+```{r}
+
+#Take published Nanog peaks and profile csaw peaks:
+#http://www.sciencedirect.com/science/article/pii/S1934590915003045
+#Ground State Conditions Induce Rapid Reorganization of Core Pluripotency Factor Binding before Global Epigenetic Reprogramming
+
+Nanogpeaks=read.table("GSE56312_mES_Nanog_Serum.NARROWPEAK")
+Nanog.df=data.frame(chrom=Nanogpeaks$V1,start=Nanogpeaks$V2,end=Nanogpeaks$V3)
+NanogGR=as(Nanog.df,"GRanges")
+NanogGR
+
+collected.nanog=list()
+for (bam in bam.files){
+collected.nanog[[bam]]=profileSites(bam, NanogGR, param=param, weight=1/rwsms[maxed])
+}
+
+profile(win,collected.nanog,"csaw.nanog.png")
+
+#Take published Nanog peaks and find overlapping csaw peaks:
+
+Nanogregions.list=list()
+for (bam in bam.files) {
+rwsms <- rowSums(assay(win[[bam]]))
+maxed <- findMaxima(rowRanges(win[[bam]]), range=1000, metric=rwsms)
+allregions=rowRanges(win[[bam]])[maxed]
+Nanogregions.list[[bam]]=suppressWarnings(subsetByOverlaps(allregions,NanogGR))
+}
+
+Nanogregall=GRanges()
+for (j in 2:5){
+Nanogregall=GenomicRanges::union(Nanogregall,Nanogregions.list[[j]])
+}
+
+collected.Nanogcsaw=list()
+for (bam in bam.files){
+collected.Nanogcsaw[[bam]] <- profileSites(bam, Nanogregall, 
+          param=param, weight=1/rwsms[maxed])
+}
+
+profile(win,collected.Nanogcsaw,"csaw.nanogpeaks.png")
 
 ```
 
 ```{r Correlation Plots}
 
 #Bring in MACS peak files:
-
 colnames=c("chrom","start","stop","name","integer_score","none","foldchange",
            "neg.log10.pval","neg.log10.qval","relative summit to peak")
 KO1_peaks=read.table("KO1_peaks.narrowPeak",col.names = colnames)
@@ -48,10 +166,12 @@ for (i in 1:6){
 total.df.lim=total.df[2:5,]
 total.df.lim
 
-makeplot(total.df.lim$total,total.df.lim$macspeaks,"Reads","Peaks","macstotalpksperreads.png")
-makeplot(total.df.lim$macstots,total.df.lim$macspeaks,"macstotalpeaks.png")
-makeplot(total.df.lim$total,total.df.lim$macstots,"macstotalpksperreads.png")
-makeplot(total.df.lim$total,total.df.lim$ratio,"Reads","ratio","macstotalratio.png")
+#makeplot(total.df.lim$total,total.df.lim$macspeaks,"Reads","Peaks","macstotalpksperreads.png")
+#makeplot(total.df.lim$macstots,total.df.lim$macspeaks,"macstotalpeaks.png")
+#makeplot(total.df.lim$total,total.df.lim$macstots,"macstotalpksperreads.png")
+#makeplot(total.df.lim$total,total.df.lim$ratio,"Reads","ratio","macstotalratio.png")
+
+##Makeplot makes plot of number of peaks vs number of reads:
 
 makeplot <- function(a,b,c,d,e) {
   xmin=min(a)-100
@@ -75,6 +195,18 @@ ggsave(e)
 
 ```{r Profiles}
 
+macsTSSregions.list=list()
+allmacsTSSregions=GRanges()
+
+for (i in 1:6){
+rwsms <- rowSums(assay(w[[i]]))
+maxed <- findMaxima(rowRanges(w[[i]]), range=1000, metric=rwsms)
+allregions=rowRanges(w[[i]])[maxed]
+macsTSSregions.list[[i]]=subsetByOverlaps(allregions,TSSpeaks.macs)
+allmacsTSSregions=union(allmacsTSSregions,macsTSSregions.list[[i]])
+#macsTSSregions.list[[i]]=allregions[queryHits(peakTSS),]
+}
+
 # 1. Get the profiles for pooled WT and KO peaks from MACS:
 
 #First get the union of both WT peaks and both KO peaks, then union of all:
@@ -82,22 +214,36 @@ WTmacspeaks=GenomicRanges::union(WT1_peaks.gr,WT2_peaks.gr)
 KOmacspeaks=GenomicRanges::union(KO1_peaks.gr,KO2_peaks.gr)
 allmacspeaks=GenomicRanges::union(WTmacspeaks,KOmacspeaks)
 
+collected1=list()
 for (curbam in bam.files) {
     collected1[[curbam]] <- profileSites(curbam, allmacspeaks, 
         param=param)}
-profile(collected1,"MACS.all.png")
+#profile(collected1,"MACS.all.png")
 
 # 2. Get the profiles for pooled WT and KO peaks from MACS (TSS only)
 
-TSSmacs=findOverlaps(allmacspeaks,prom_regions) 
-allmacs.TSSpeaks=allmacspeaks[queryHits(TSSmacs),]
-TSSpeaks.macs=prom_regions[subjectHits(TSSmacs),]  #Drop from 55,596 -> 4,811 overlapping promoter regions
+allmacs.TSSpeaks=subsetByOverlaps(allmacspeaks,prom_regions)
+TSSpeaks.macs=subsetByOverlaps(prom_regions,allmacspeaks)
+
+comppeaks=list(
+  findmacs=unique(TSSpeaks.macs),
+  findcsaw=unique(allmacs.TSSpeaks)
+)
+
+k=c(1,2)
+venn.names=as.character(names(comppeaks)[k])
+res <- makeVennDiagram(Peaks=comppeaks[k],
+                        NameOfPeaks=venn.names)
+makevenn(res,venn.names[1],venn.names[2],"Nanog_KO_Venn_MACS.png")
+
 
 collected2=list()
 for (curbam in bam.files) {
-  collected2[[curbam]] <- profileSites(curbam, allmacs.TSSpeaks, 
+  collected2[[curbam]] <- profileSites(curbam, allmacsTSSregions, 
                   param=param)}
-profile(collected2,"MACS.TSS.png")
+#  collected2[[curbam]] <- profileSites(curbam, allmacs.TSSpeaks, 
+#                  param=param)}
+profile(collected2,"MACS.TSS.2.png")
 
 #Get the profiles for all promoters:
 
@@ -107,31 +253,12 @@ for (curbam in bam.files) {
                       param=param)}
 profile(collected3,"TSS.MACS.png")
 
-#Function to take the aggregate of the signal:
-
-profile <- function(x,y){
-xranged <- as.integer(names(x[[1]]))
-ymax=max(unlist(lapply(x ,function(x) max(x))))/3
-plot.new()
-png(y)
-plot(xranged, (x[[1]]/w[[1]]$totals)*10e6, type="l", col="blue", xlim=c(-1000, 1000), 
-     ylim=c(0,ymax),lwd=2,
-     xlab="Distance (bp)", ylab="Relative coverage per base")
-lines(xranged, (x[[2]]/w[[2]]$totals)*10e6, col="forestgreen", lwd=2)
-lines(xranged, (x[[3]]/w[[3]]$totals)*10e6, col="grey", lwd=2)
-lines(xranged, (x[[4]]/w[[4]]$totals)*10e6, col="red", lwd=2)
-lines(xranged, (x[[5]]/w[[5]]$totals)*10e6, col="orange", lwd=2)
-lines(xranged, (x[[6]]/w[[2]]$totals)*10e6, col="cyan", lwd=2)
-
-legend("topleft", col=c("blue", "forestgreen", "grey","red","orange","cyan"),
-       target$CellType, pch=16)
-dev.off()
-}
-abline(v=c(-177,177), col="dodgerblue", lty=2)
 
 ```
 ```{r Venn Diagram}
 library(Vennerable)
+require(ChIPpeakAnno)
+
 venn_cnt2venn <- function(venn_cnt){
   n <- which(colnames(venn_cnt)=="Counts") - 1
   SetNames=colnames(venn_cnt)[1:n]
@@ -163,6 +290,18 @@ WT1_peaks.macs=GRanges(WT1_peaks),
 WT2_peaks.macs=GRanges(WT2_peaks)
 )
 
+macspeaks2=list(
+  macs=allmacs.TSSpeaks,
+  csaw=allmacsTSSregions
+)
+
+k=c(1,2)
+venn.names=as.character(names(macspeaks2)[k])
+res <- makeVennDiagram(Peaks=macspeaks2[k],
+                        NameOfPeaks=venn.names)
+makevenn(res,venn.names[1],venn.names[2],"Nanog_KO_Venn_MACS.png")
+
+
 k=c(1,2)
 venn.names=as.character(names(macspeaks)[k])
 res1 <- makeVennDiagram(Peaks=macspeaks[k],
@@ -180,13 +319,29 @@ makevenn(res2,venn.names[1],venn.names[2],"Nanog_WT_Venn_MACS.png")
 groupedmacspeaks=list(
   WT1.2macs=WTmacspeaks,
   KO1.2macs=KOmacspeaks,
-  WT.KO=allmacspeaks)
+  WT.KO=allmacspeaks,
+  Nanog.narrow=NanogGR,
+  Nanog.csaw=Nanogregall)
 
 k=c(1,2)
 venn.names=as.character(names(groupedmacspeaks)[k])
 res2 <- makeVennDiagram(Peaks=groupedmacspeaks[k],
                         NameOfPeaks=venn.names)
 makevenn(res2,venn.names[1],venn.names[2],"Nanog_WT_KO_Pooled_Venn_MACS.png")
+
+k=c(3,4,5)
+venn.names=as.character(names(groupedmacspeaks)[k])
+res2 <- makeVennDiagram(Peaks=groupedmacspeaks[k],
+                        NameOfPeaks=venn.names)
+makevenn(res2,venn.names[1],venn.names[2],venn.names[3],
+         "Nanogpks_macs_WT_KO_Pooled_Venn.png")
+
+k=c(4,5)
+venn.names=as.character(names(groupedmacspeaks)[k])
+res2 <- makeVennDiagram(Peaks=groupedmacspeaks[k],
+                        NameOfPeaks=venn.names)
+makevenn(res2,venn.names[1],venn.names[2],
+         "Nanogpks_Venn.png")
 
 #Do overlaps with TSS:
 KO1_TSSmacspeaks=subsetByOverlaps(KO1_peaks.gr,prom_regions)
@@ -324,8 +479,6 @@ MAplotcloud(norm3.ip.filt,5,6,"KO-WT-mean3-MA.TSS.png","Loess-normalized")
 
 
 finalres=cbind(as.data.frame(rowRanges(reg.counts.tss)[filt,]),norm3.ip.filt)
-
-
 
 ```
 
